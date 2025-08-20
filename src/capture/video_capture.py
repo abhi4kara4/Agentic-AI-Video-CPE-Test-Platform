@@ -25,47 +25,74 @@ class VideoCapture:
         try:
             log.info(f"Starting video capture from: {self.stream_url}")
             
-            # Set up video capture with optimizations
-            self.cap = cv2.VideoCapture(self.stream_url)
+            # For HTTPS streams, try different backends
+            if self.stream_url.startswith('https://'):
+                # Try different OpenCV backends for HTTPS
+                backends_to_try = [
+                    cv2.CAP_FFMPEG,  # FFmpeg backend (best for network streams)
+                    cv2.CAP_GSTREAMER,  # GStreamer backend
+                    cv2.CAP_ANY  # Auto-detect
+                ]
+                
+                for backend in backends_to_try:
+                    try:
+                        log.info(f"Trying OpenCV backend: {backend}")
+                        self.cap = cv2.VideoCapture(self.stream_url, backend)
+                        
+                        if self.cap.isOpened():
+                            # Test frame read
+                            ret, test_frame = self.cap.read()
+                            if ret and test_frame is not None:
+                                log.info(f"Successfully opened stream with backend: {backend}")
+                                break
+                            else:
+                                log.warning(f"Backend {backend} opened stream but cannot read frames")
+                                self.cap.release()
+                                continue
+                        else:
+                            log.warning(f"Backend {backend} failed to open stream")
+                            continue
+                    except Exception as e:
+                        log.warning(f"Backend {backend} error: {e}")
+                        continue
+                else:
+                    log.error("All OpenCV backends failed for HTTPS stream")
+                    return False
+            else:
+                # For HTTP/RTSP streams, use default
+                self.cap = cv2.VideoCapture(self.stream_url)
             
             # Set capture properties for better performance
-            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            self.cap.set(cv2.CAP_PROP_FPS, settings.video_fps)
-            
-            # For HTTPS streams, try additional configurations
-            if self.stream_url.startswith('https://'):
-                # Set user agent and other HTTP headers via OpenCV
+            if self.cap.isOpened():
+                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                self.cap.set(cv2.CAP_PROP_FPS, settings.video_fps)
+                
+                # Additional settings for network streams
                 self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
-                # Set network timeout (in milliseconds)
-                self.cap.set(cv2.CAP_PROP_POS_MSEC, 30000)
-            
-            if not self.cap.isOpened():
+                
+                # Test reading a frame to verify stream works
+                ret, test_frame = self.cap.read()
+                if not ret or test_frame is None:
+                    log.error("Stream opened but cannot read frames")
+                    log.error("Possible causes:")
+                    log.error("1. Stream format not supported")
+                    log.error("2. Network connectivity issues") 
+                    log.error("3. Stream requires specific headers")
+                    return False
+                
+                log.info(f"Stream test successful. Frame shape: {test_frame.shape}")
+                
+                self.is_running = True
+                self.capture_thread = threading.Thread(target=self._capture_loop)
+                self.capture_thread.daemon = True
+                self.capture_thread.start()
+                
+                log.info("Video capture started successfully")
+                return True
+            else:
                 log.error(f"Failed to open video stream: {self.stream_url}")
-                log.error("This could be due to:")
-                log.error("1. Network connectivity issues")
-                log.error("2. Authentication required for the stream")
-                log.error("3. Stream format not supported by OpenCV")
-                log.error("4. HTTPS/SSL certificate issues")
                 return False
                 
-            # Test reading a frame to verify stream works
-            ret, test_frame = self.cap.read()
-            if not ret or test_frame is None:
-                log.error("Stream opened but cannot read frames")
-                log.error("Stream may require authentication or be in unsupported format")
-                return False
-            
-            # Reset to beginning
-            self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                
-            self.is_running = True
-            self.capture_thread = threading.Thread(target=self._capture_loop)
-            self.capture_thread.daemon = True
-            self.capture_thread.start()
-            
-            log.info("Video capture started successfully")
-            return True
-            
         except Exception as e:
             log.error(f"Error starting video capture: {e}")
             return False

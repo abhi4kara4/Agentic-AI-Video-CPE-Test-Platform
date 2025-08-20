@@ -9,6 +9,7 @@ from src.capture.video_capture import VideoCapture
 from src.capture.http_video_capture import HttpVideoCapture
 from src.agent.vision_agent import VisionAgent
 from src.utils.logger import log
+from src.utils.stream_tester import test_stream_connectivity
 from src.config import settings
 
 
@@ -18,13 +19,9 @@ class TestOrchestrator:
     def __init__(self, mac_address: Optional[str] = None):
         self.device_controller = DeviceController(mac_address)
         
-        # Try HTTP capture first for HTTPS streams, fallback to OpenCV
-        if settings.video_stream_url.startswith('https://'):
-            log.info("Using HTTP video capture for HTTPS stream")
-            self.video_capture = HttpVideoCapture()
-        else:
-            log.info("Using OpenCV video capture")
-            self.video_capture = VideoCapture()
+        # Always try OpenCV first (better for video streams)
+        log.info("Using OpenCV video capture")
+        self.video_capture = VideoCapture()
             
         self.vision_agent = VisionAgent()
         self.current_state = "unknown"
@@ -49,6 +46,13 @@ class TestOrchestrator:
                 else:
                     log.warning("Could not lock device, continuing without lock (development mode)")
                 
+            # Test stream connectivity first
+            log.info("Testing video stream connectivity...")
+            stream_accessible = await test_stream_connectivity()
+            
+            if not stream_accessible:
+                log.warning("Stream connectivity test failed, but continuing anyway")
+            
             # Start video capture with fallback
             if not self.video_capture.start():
                 log.warning("Primary video capture failed, trying fallback method")
