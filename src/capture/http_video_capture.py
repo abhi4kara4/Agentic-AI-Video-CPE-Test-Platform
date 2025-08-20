@@ -121,28 +121,116 @@ class HttpVideoCapture:
     async def _capture_frame_http(self, session: aiohttp.ClientSession) -> Optional[np.ndarray]:
         """Capture a single frame via HTTP request"""
         try:
-            # Add timestamp to avoid caching
-            url = f"{self.stream_url}&_t={int(time.time() * 1000)}"
+            # Test different approaches for the stream
+            urls_to_try = [
+                self.stream_url,  # Original URL
+                f"{self.stream_url}&_t={int(time.time() * 1000)}",  # With timestamp
+            ]
             
-            async with session.get(url) as response:
-                if response.status == 200:
-                    # Read image data
-                    image_data = await response.read()
-                    
-                    # Convert to OpenCV format
-                    image = Image.open(io.BytesIO(image_data))
-                    frame = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-                    
-                    return frame
-                else:
-                    log.warning(f"HTTP capture failed: {response.status}")
-                    return None
+            for url in urls_to_try:
+                try:
+                    async with session.get(url) as response:
+                        if response.status == 200:
+                            content_type = response.headers.get('Content-Type', '').lower()
+                            log.debug(f"Response Content-Type: {content_type}")
+                            
+                            # Check if it's an MJPEG stream
+                            if 'multipart' in content_type:
+                                log.info("Detected MJPEG multipart stream")
+                                # For MJPEG streams, we need to parse the multipart content
+                                return await self._parse_mjpeg_frame(response)
+                            
+                            # Try as single image
+                            image_data = await response.read()
+                            
+                            if len(image_data) == 0:
+                                log.warning("Received empty response")
+                                continue
+                            
+                            # Try to decode as image
+                            try:
+                                # Convert to OpenCV format
+                                nparr = np.frombuffer(image_data, np.uint8)
+                                frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                                
+                                if frame is not None:
+                                    log.debug(f"Successfully decoded frame: {frame.shape}")
+                                    return frame
+                                else:
+                                    # Try PIL as fallback
+                                    image = Image.open(io.BytesIO(image_data))
+                                    frame = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+                                    return frame
+                                    
+                            except Exception as decode_error:
+                                log.warning(f"Failed to decode image data: {decode_error}")
+                                continue
+                        else:
+                            log.warning(f"HTTP capture failed: {response.status}")
+                            continue
+                            
+                except Exception as url_error:
+                    log.warning(f"Failed to fetch {url}: {url_error}")
+                    continue
+            
+            return None
                     
         except asyncio.TimeoutError:
             log.warning("HTTP capture timeout")
             return None
         except Exception as e:
             log.error(f"Error in HTTP frame capture: {e}")
+            return None
+    
+    async def _parse_mjpeg_frame(self, response) -> Optional[np.ndarray]:
+        """Parse a frame from MJPEG multipart stream"""
+        try:
+            # Read the multipart content
+            boundary = None
+            content_type = response.headers.get('Content-Type', '')
+            
+            # Extract boundary from content type
+            if 'boundary=' in content_type:
+                boundary = content_type.split('boundary=')[1].split(';')[0].strip()
+                if boundary.startswith('"') and boundary.endswith('"'):
+                    boundary = boundary[1:-1]
+            
+            if not boundary:
+                log.warning("Could not find boundary in MJPEG stream")
+                return None
+            
+            # Read until we find a complete frame
+            buffer = b''
+            chunk_size = 8192
+            
+            while len(buffer) < 1024 * 1024:  # Max 1MB per frame
+                chunk = await response.content.read(chunk_size)
+                if not chunk:
+                    break
+                    
+                buffer += chunk
+                
+                # Look for JPEG frame boundaries
+                if b'\xff\xd8' in buffer and b'\xff\xd9' in buffer:
+                    # Found start and end of JPEG
+                    start = buffer.find(b'\xff\xd8')
+                    end = buffer.find(b'\xff\xd9', start) + 2
+                    
+                    if start >= 0 and end > start:
+                        jpeg_data = buffer[start:end]
+                        
+                        # Decode JPEG
+                        nparr = np.frombuffer(jpeg_data, np.uint8)
+                        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                        
+                        if frame is not None:
+                            return frame
+            
+            log.warning("Could not extract frame from MJPEG stream")
+            return None
+            
+        except Exception as e:
+            log.error(f"Error parsing MJPEG frame: {e}")
             return None
     
     def get_frame(self) -> Optional[np.ndarray]:

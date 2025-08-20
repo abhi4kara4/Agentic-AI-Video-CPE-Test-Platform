@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     # Development Configuration
     development_mode: bool = True
     require_device_lock: bool = False
+    skip_video_capture: bool = False
     
     # Logging
     log_level: str = "INFO"

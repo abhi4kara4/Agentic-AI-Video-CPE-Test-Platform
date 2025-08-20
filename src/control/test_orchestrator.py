@@ -46,28 +46,31 @@ class TestOrchestrator:
                 else:
                     log.warning("Could not lock device, continuing without lock (development mode)")
                 
-            # Test stream connectivity first
-            log.info("Testing video stream connectivity...")
-            stream_accessible = await test_stream_connectivity()
-            
-            if not stream_accessible:
-                log.warning("Stream connectivity test failed, but continuing anyway")
-            
-            # Start video capture with fallback
-            if not self.video_capture.start():
-                log.warning("Primary video capture failed, trying fallback method")
+            # Start video capture with fallback (unless skipped)
+            if settings.skip_video_capture:
+                log.warning("Video capture skipped per configuration")
+            else:
+                # Test stream connectivity first
+                log.info("Testing video stream connectivity...")
+                stream_accessible = await test_stream_connectivity()
                 
-                # Try alternative capture method
-                if isinstance(self.video_capture, HttpVideoCapture):
-                    log.info("Falling back to OpenCV video capture")
-                    self.video_capture = VideoCapture()
-                else:
-                    log.info("Falling back to HTTP video capture")
-                    self.video_capture = HttpVideoCapture()
+                if not stream_accessible:
+                    log.warning("Stream connectivity test failed, but continuing anyway")
                 
                 if not self.video_capture.start():
-                    log.error("All video capture methods failed")
-                    return False
+                    log.warning("Primary video capture failed, trying fallback method")
+                    
+                    # Try alternative capture method
+                    if isinstance(self.video_capture, HttpVideoCapture):
+                        log.info("Falling back to OpenCV video capture")
+                        self.video_capture = VideoCapture()
+                    else:
+                        log.info("Falling back to HTTP video capture")
+                        self.video_capture = HttpVideoCapture()
+                    
+                    if not self.video_capture.start():
+                        log.error("All video capture methods failed")
+                        return False
                 
             # Initialize vision agent
             if not await self.vision_agent.initialize():

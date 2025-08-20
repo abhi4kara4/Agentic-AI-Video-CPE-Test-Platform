@@ -25,42 +25,77 @@ class VideoCapture:
         try:
             log.info(f"Starting video capture from: {self.stream_url}")
             
-            # For HTTPS streams, try different backends
-            if self.stream_url.startswith('https://'):
-                # Try different OpenCV backends for HTTPS
+            # For network streams, try different approaches
+            success = False
+            
+            if self.stream_url.startswith(('http://', 'https://')):
+                # Try different OpenCV backends for HTTP/HTTPS streams
                 backends_to_try = [
-                    cv2.CAP_FFMPEG,  # FFmpeg backend (best for network streams)
-                    cv2.CAP_GSTREAMER,  # GStreamer backend
-                    cv2.CAP_ANY  # Auto-detect
+                    (cv2.CAP_FFMPEG, "FFmpeg"),
+                    (cv2.CAP_GSTREAMER, "GStreamer"), 
+                    (cv2.CAP_ANY, "Auto-detect")
                 ]
                 
-                for backend in backends_to_try:
+                for backend, name in backends_to_try:
                     try:
-                        log.info(f"Trying OpenCV backend: {backend}")
+                        log.info(f"Trying OpenCV backend: {name} ({backend})")
                         self.cap = cv2.VideoCapture(self.stream_url, backend)
                         
                         if self.cap.isOpened():
-                            # Test frame read
-                            ret, test_frame = self.cap.read()
-                            if ret and test_frame is not None:
-                                log.info(f"Successfully opened stream with backend: {backend}")
+                            log.info(f"Stream opened with {name} backend")
+                            
+                            # Set properties before testing frame read
+                            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                            self.cap.set(cv2.CAP_PROP_FPS, settings.video_fps)
+                            
+                            # Give stream some time to initialize
+                            import time
+                            time.sleep(1)
+                            
+                            # Test multiple frame reads (sometimes first fails)
+                            for attempt in range(3):
+                                ret, test_frame = self.cap.read()
+                                if ret and test_frame is not None:
+                                    log.info(f"✓ Successfully read frame with {name}: {test_frame.shape}")
+                                    success = True
+                                    break
+                                else:
+                                    log.warning(f"Frame read attempt {attempt + 1} failed with {name}")
+                                    time.sleep(0.5)
+                            
+                            if success:
                                 break
                             else:
-                                log.warning(f"Backend {backend} opened stream but cannot read frames")
+                                log.warning(f"✗ {name} opened stream but all frame reads failed")
                                 self.cap.release()
                                 continue
                         else:
-                            log.warning(f"Backend {backend} failed to open stream")
+                            log.warning(f"✗ {name} failed to open stream")
                             continue
                     except Exception as e:
-                        log.warning(f"Backend {backend} error: {e}")
+                        log.warning(f"✗ {name} backend error: {e}")
+                        if hasattr(self, 'cap') and self.cap:
+                            self.cap.release()
                         continue
-                else:
-                    log.error("All OpenCV backends failed for HTTPS stream")
+                
+                if not success:
+                    log.error("All OpenCV backends failed for HTTP/HTTPS stream")
                     return False
             else:
-                # For HTTP/RTSP streams, use default
+                # For RTSP or other protocols, use default
+                log.info("Using default OpenCV backend for non-HTTP stream")
                 self.cap = cv2.VideoCapture(self.stream_url)
+                
+                if self.cap.isOpened():
+                    ret, test_frame = self.cap.read()
+                    if ret and test_frame is not None:
+                        success = True
+                    else:
+                        log.error("Default backend opened stream but cannot read frames")
+                        return False
+                else:
+                    log.error("Default backend failed to open stream")
+                    return False
             
             # Set capture properties for better performance
             if self.cap.isOpened():
