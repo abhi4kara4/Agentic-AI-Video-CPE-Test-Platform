@@ -6,8 +6,10 @@ import time
 from src.control.device_controller import DeviceController
 from src.control.key_commands import KeyCommand
 from src.capture.video_capture import VideoCapture
+from src.capture.http_video_capture import HttpVideoCapture
 from src.agent.vision_agent import VisionAgent
 from src.utils.logger import log
+from src.config import settings
 
 
 class TestOrchestrator:
@@ -15,7 +17,15 @@ class TestOrchestrator:
     
     def __init__(self, mac_address: Optional[str] = None):
         self.device_controller = DeviceController(mac_address)
-        self.video_capture = VideoCapture()
+        
+        # Try HTTP capture first for HTTPS streams, fallback to OpenCV
+        if settings.video_stream_url.startswith('https://'):
+            log.info("Using HTTP video capture for HTTPS stream")
+            self.video_capture = HttpVideoCapture()
+        else:
+            log.info("Using OpenCV video capture")
+            self.video_capture = VideoCapture()
+            
         self.vision_agent = VisionAgent()
         self.current_state = "unknown"
         self.test_running = False
@@ -39,10 +49,21 @@ class TestOrchestrator:
                 else:
                     log.warning("Could not lock device, continuing without lock (development mode)")
                 
-            # Start video capture
+            # Start video capture with fallback
             if not self.video_capture.start():
-                log.error("Failed to start video capture")
-                return False
+                log.warning("Primary video capture failed, trying fallback method")
+                
+                # Try alternative capture method
+                if isinstance(self.video_capture, HttpVideoCapture):
+                    log.info("Falling back to OpenCV video capture")
+                    self.video_capture = VideoCapture()
+                else:
+                    log.info("Falling back to HTTP video capture")
+                    self.video_capture = HttpVideoCapture()
+                
+                if not self.video_capture.start():
+                    log.error("All video capture methods failed")
+                    return False
                 
             # Initialize vision agent
             if not await self.vision_agent.initialize():

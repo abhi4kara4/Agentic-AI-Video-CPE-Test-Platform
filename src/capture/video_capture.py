@@ -32,9 +32,31 @@ class VideoCapture:
             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             self.cap.set(cv2.CAP_PROP_FPS, settings.video_fps)
             
+            # For HTTPS streams, try additional configurations
+            if self.stream_url.startswith('https://'):
+                # Set user agent and other HTTP headers via OpenCV
+                self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+                # Set network timeout (in milliseconds)
+                self.cap.set(cv2.CAP_PROP_POS_MSEC, 30000)
+            
             if not self.cap.isOpened():
-                log.error("Failed to open video stream")
+                log.error(f"Failed to open video stream: {self.stream_url}")
+                log.error("This could be due to:")
+                log.error("1. Network connectivity issues")
+                log.error("2. Authentication required for the stream")
+                log.error("3. Stream format not supported by OpenCV")
+                log.error("4. HTTPS/SSL certificate issues")
                 return False
+                
+            # Test reading a frame to verify stream works
+            ret, test_frame = self.cap.read()
+            if not ret or test_frame is None:
+                log.error("Stream opened but cannot read frames")
+                log.error("Stream may require authentication or be in unsupported format")
+                return False
+            
+            # Reset to beginning
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 
             self.is_running = True
             self.capture_thread = threading.Thread(target=self._capture_loop)

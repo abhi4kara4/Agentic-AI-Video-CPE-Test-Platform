@@ -87,7 +87,7 @@ class DeviceController:
             params = {"category": self.allocation_category}
             
             async with self._session.delete(url, headers=headers, params=params) as response:
-                if response.status in [200, 204]:
+                if response.status == 204:
                     self.is_locked = False
                     log.info(f"Device unlocked successfully: {self.mac_address}")
                     return True
