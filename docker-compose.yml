@@ -1,0 +1,89 @@
+services:
+  # Ollama service for running LLaVA model
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ai-test-ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    command: serve
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # Redis for state management
+  redis:
+    image: redis:7-alpine
+    container_name: ai-test-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # Main application
+  app:
+    build: .
+    container_name: ai-test-platform
+    depends_on:
+      - ollama
+      - redis
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./src:/app/src
+      - ./tests:/app/tests
+      - ./screenshots:/app/screenshots
+      - ./reports:/app/reports
+      - ./logs:/app/logs
+      - ./.env:/app/.env
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+      - REDIS_HOST=redis
+      - PYTHONUNBUFFERED=1
+    command: >
+      sh -c "
+        echo 'Waiting for Ollama to be ready...' &&
+        sleep 10 &&
+        curl -X POST http://ollama:11434/api/pull -d '{\"name\":\"llava:7b\"}' &&
+        python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
+      "
+    restart: unless-stopped
+
+  # Test runner service
+  runner:
+    build: .
+    container_name: ai-test-runner
+    depends_on:
+      - app
+      - ollama
+      - redis
+    volumes:
+      - ./src:/app/src
+      - ./tests:/app/tests
+      - ./reports:/app/reports
+      - ./screenshots:/app/screenshots
+      - ./.env:/app/.env
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+      - REDIS_HOST=redis
+      - API_URL=http://app:8000
+      - PYTHONUNBUFFERED=1
+    command: tail -f /dev/null  # Keep container running for manual test execution
+    restart: unless-stopped
+
+volumes:
+  ollama_data:
+  redis_data:
