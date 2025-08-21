@@ -49,10 +49,11 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_file: Optional[str] = "./logs/platform.log"
     
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = False
+    model_config = {
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+        "case_sensitive": False
+    }
     
     @property
     def video_stream_url(self) -> str:

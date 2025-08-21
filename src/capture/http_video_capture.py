@@ -136,7 +136,7 @@ class HttpVideoCapture:
                             
                             # Check if it's an MJPEG stream
                             if 'multipart' in content_type:
-                                log.info("Detected MJPEG multipart stream")
+                                log.debug("Detected MJPEG multipart stream")
                                 # For MJPEG streams, we need to parse the multipart content
                                 return await self._parse_mjpeg_frame(response)
                             
@@ -224,6 +224,7 @@ class HttpVideoCapture:
                         frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
                         
                         if frame is not None:
+                            log.info(f"✓ Successfully decoded MJPEG frame: {frame.shape}")
                             return frame
             
             log.warning("Could not extract frame from MJPEG stream")

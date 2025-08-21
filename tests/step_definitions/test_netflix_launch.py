@@ -1,12 +1,14 @@
 import pytest
 from pytest_bdd import scenarios, given, when, then, parsers
 import asyncio
+import os
 
 from src.control.test_orchestrator import TestOrchestrator
 from src.utils.logger import log
 
-# Load scenarios
-scenarios('../features/netflix_launch.feature')
+# Load scenarios from the correct path
+feature_file = os.path.join(os.path.dirname(__file__), '..', 'features', 'netflix_launch.feature')
+scenarios(feature_file)
 
 
 @given('the test platform is initialized')
