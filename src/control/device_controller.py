@@ -59,7 +59,7 @@ class DeviceController:
             params = {"category": self.allocation_category}
             
             async with self._session.post(url, headers=headers, params=params) as response:
-                if response.status == 200:
+                if response.status in [200, 204]:
                     self.is_locked = True
                     log.info(f"Device locked successfully: {self.mac_address}")
                     return True

@@ -7,7 +7,7 @@ import os
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from src.control.test_orchestrator import TestOrchestrator
+from src.control.test_orchestrator import PlatformOrchestrator
 from src.utils.logger import log
 
 
@@ -22,7 +22,7 @@ def event_loop():
 @pytest.fixture(scope="session")
 async def test_orchestrator():
     """Create and initialize test orchestrator for the session"""
-    orchestrator = TestOrchestrator()
+    orchestrator = PlatformOrchestrator()
     
     # Initialize
     if not await orchestrator.initialize():

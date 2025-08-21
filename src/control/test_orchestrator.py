@@ -13,7 +13,7 @@ from src.utils.stream_tester import test_stream_connectivity
 from src.config import settings
 
 
-class TestOrchestrator:
+class PlatformOrchestrator:
     """Orchestrates test execution by coordinating video capture, AI analysis, and device control"""
     
     def __init__(self, mac_address: Optional[str] = None):

@@ -8,7 +8,7 @@ from typing import Dict, Any, Optional, List
 import uuid
 from datetime import datetime
 
-from src.control.test_orchestrator import TestOrchestrator
+from src.control.test_orchestrator import PlatformOrchestrator
 from src.control.key_commands import KeyCommand
 from src.utils.logger import log
 from src.config import settings
@@ -26,7 +26,7 @@ async def lifespan(app: FastAPI):
     log.info("Starting AI Test Platform API")
     
     # Initialize orchestrator
-    orchestrator = TestOrchestrator()
+    orchestrator = PlatformOrchestrator()
     if not await orchestrator.initialize(require_device_lock=settings.require_device_lock):
         log.error("Failed to initialize orchestrator")
         raise RuntimeError("Failed to initialize test platform")
