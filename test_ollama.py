@@ -47,17 +47,31 @@ async def test_ollama():
     else:
         log.info("✓ LLaVA model is available")
     
-    # Test simple text analysis (without image)
-    log.info("💭 Testing text analysis...")
+    # Test simple image analysis with a minimal test image
+    log.info("🖼️ Testing image analysis with dummy data...")
     try:
-        result = await client.analyze_text("What is the color of grass?")
+        # Create a simple 1x1 white pixel image in base64
+        import base64
+        from PIL import Image
+        import io
+        
+        # Create a tiny test image
+        test_image = Image.new('RGB', (1, 1), color='white')
+        buffer = io.BytesIO()
+        test_image.save(buffer, format='PNG')
+        image_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+        
+        log.info("Sending test image to LLaVA (this may take 10-60 seconds)...")
+        result = await client.analyze_image(image_base64, "What do you see in this image?")
+        
         if result and result.get('response'):
-            log.info(f"✓ Text analysis working: {result['response'][:100]}...")
+            log.info(f"✓ Image analysis working: {result['response'][:100]}...")
+            log.info(f"Analysis took: {result.get('total_duration', 0):.1f} seconds")
         else:
-            log.error("✗ Text analysis failed")
+            log.error("✗ Image analysis failed - no response")
             return False
     except Exception as e:
-        log.error(f"✗ Text analysis error: {e}")
+        log.error(f"✗ Image analysis error: {e}")
         return False
     
     log.info("🎉 Ollama tests completed successfully!")
