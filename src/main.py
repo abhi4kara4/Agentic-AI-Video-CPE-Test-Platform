@@ -24,11 +24,11 @@ def run_api_server():
 
 async def run_standalone_test():
     """Run a standalone test for demonstration"""
-    from src.control.test_orchestrator import TestOrchestrator
+    from src.control.test_orchestrator import PlatformOrchestrator
     
     log.info("Starting standalone test demonstration")
     
-    orchestrator = TestOrchestrator()
+    orchestrator = PlatformOrchestrator()
     
     try:
         # Initialize

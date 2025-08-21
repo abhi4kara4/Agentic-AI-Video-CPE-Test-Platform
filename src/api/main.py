@@ -15,7 +15,7 @@ from src.config import settings
 
 
 # Global orchestrator instance
-orchestrator: Optional[TestOrchestrator] = None
+orchestrator: Optional[PlatformOrchestrator] = None
 
 
 @asynccontextmanager

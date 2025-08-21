@@ -9,14 +9,14 @@ import os
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-from src.control.test_orchestrator import TestOrchestrator
+from src.control.test_orchestrator import PlatformOrchestrator
 from src.utils.logger import log
 
 async def test_platform_basic():
     """Test basic platform functionality"""
     log.info("🧪 Starting basic platform test...")
     
-    orchestrator = TestOrchestrator()
+    orchestrator = PlatformOrchestrator()
     
     try:
         # Test initialization
