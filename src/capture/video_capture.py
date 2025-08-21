@@ -184,6 +184,20 @@ class VideoCapture:
             # Return last known frame if queue is empty
             return self.last_frame
     
+    def wait_for_frame(self, max_wait_seconds: float = 10.0) -> Optional[np.ndarray]:
+        """Wait for a frame to be available"""
+        start_time = time.time()
+        wait_interval = 0.1
+        
+        while time.time() - start_time < max_wait_seconds:
+            frame = self.get_frame()
+            if frame is not None:
+                return frame
+            time.sleep(wait_interval)
+        
+        log.warning(f"No frame available after waiting {max_wait_seconds}s")
+        return None
+    
     def get_frame_stream(self) -> Generator[np.ndarray, None, None]:
         """Generator that yields frames at specified FPS"""
         frame_interval = 1.0 / settings.video_fps

@@ -37,11 +37,26 @@ class HttpVideoCapture:
             self._thread.daemon = True
             self._thread.start()
             
-            # Wait a bit to see if startup succeeds
-            time.sleep(2)
+            # Wait for frames to be available before returning
+            max_wait_time = 15  # seconds
+            wait_interval = 0.5
+            elapsed = 0
             
-            log.info("HTTP video capture started successfully")
-            return True
+            log.info("Waiting for video frames to be available...")
+            while elapsed < max_wait_time:
+                time.sleep(wait_interval)
+                elapsed += wait_interval
+                
+                # Check if we have frames
+                if self.last_frame is not None or not self.frame_queue.empty():
+                    log.info(f"✓ HTTP video capture started and frames available after {elapsed:.1f}s")
+                    return True
+                
+                if elapsed % 2 == 0:  # Log every 2 seconds
+                    log.info(f"Still waiting for frames... ({elapsed:.1f}s)")
+            
+            log.warning(f"HTTP video capture started but no frames after {max_wait_time}s")
+            return True  # Still return True as capture is running
             
         except Exception as e:
             log.error(f"Error starting HTTP video capture: {e}")
@@ -244,6 +259,20 @@ class HttpVideoCapture:
         except Empty:
             # Return last known frame if queue is empty
             return self.last_frame
+    
+    def wait_for_frame(self, max_wait_seconds: float = 10.0) -> Optional[np.ndarray]:
+        """Wait for a frame to be available"""
+        start_time = time.time()
+        wait_interval = 0.1
+        
+        while time.time() - start_time < max_wait_seconds:
+            frame = self.get_frame()
+            if frame is not None:
+                return frame
+            time.sleep(wait_interval)
+        
+        log.warning(f"No frame available after waiting {max_wait_seconds}s")
+        return None
     
     def capture_screenshot(self, filename: Optional[str] = None) -> Optional[str]:
         """Capture current frame as screenshot"""

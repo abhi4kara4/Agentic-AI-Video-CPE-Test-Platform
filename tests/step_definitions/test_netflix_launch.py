@@ -61,19 +61,10 @@ def launch_app(test_orchestrator, app_name):
 @then(parsers.parse('{app_name} should launch'))
 def app_should_launch(test_orchestrator, app_name):
     """Verify app launched"""
-    # Wait a bit for video frames to be captured
-    import time
-    max_attempts = 10
-    frame = None
+    # Use the wait_for_frame method with proper timeout
+    frame = wait_for_frame(test_orchestrator.video_capture, max_wait_seconds=15)
     
-    for attempt in range(max_attempts):
-        frame = test_orchestrator.video_capture.get_frame()
-        if frame is not None:
-            break
-        log.info(f"Waiting for video frames... attempt {attempt + 1}/{max_attempts}")
-        time.sleep(1)
-    
-    assert frame is not None, f"No video frames available after {max_attempts} seconds"
+    assert frame is not None, "No video frames available after waiting 15 seconds"
     log.info(f"✓ Video frame captured: {frame.shape}")
     log.info(f"Video frames available, assuming {app_name} launch verification")
 
@@ -141,14 +132,7 @@ def screen_not_frozen(test_orchestrator):
         log.info("✓ Frames are different - screen is live")
 
 
-def wait_for_frame(video_capture, max_attempts=10):
+def wait_for_frame(video_capture, max_wait_seconds=10):
     """Helper function to wait for frames to be available"""
-    import time
-    for attempt in range(max_attempts):
-        frame = video_capture.get_frame()
-        if frame is not None:
-            return frame
-        if attempt == 0:
-            log.info("Waiting for video frames to be available...")
-        time.sleep(1)
-    return None
+    # Use the video capture's built-in wait method
+    return video_capture.wait_for_frame(max_wait_seconds)
