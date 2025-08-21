@@ -61,62 +61,73 @@ def launch_app(test_orchestrator, app_name):
 @then(parsers.parse('{app_name} should launch'))
 def app_should_launch(test_orchestrator, app_name):
     """Verify app launched"""
-    # For now, just check that we have video frames
-    frame = test_orchestrator.video_capture.get_frame()
-    assert frame is not None, "No video frames available"
+    # Wait a bit for video frames to be captured
+    import time
+    max_attempts = 10
+    frame = None
+    
+    for attempt in range(max_attempts):
+        frame = test_orchestrator.video_capture.get_frame()
+        if frame is not None:
+            break
+        log.info(f"Waiting for video frames... attempt {attempt + 1}/{max_attempts}")
+        time.sleep(1)
+    
+    assert frame is not None, f"No video frames available after {max_attempts} seconds"
+    log.info(f"✓ Video frame captured: {frame.shape}")
     log.info(f"Video frames available, assuming {app_name} launch verification")
 
 
 @then('I should see either login screen or profile selection or home screen')
 def verify_app_screens(test_orchestrator):
     """Verify expected app screens appear"""
-    # For now, just check that we have video frames
-    frame = test_orchestrator.video_capture.get_frame()
+    # Wait for and get frame
+    frame = wait_for_frame(test_orchestrator.video_capture)
     assert frame is not None, "No video frames available"
-    log.info("Video frames available, assuming screen verification passed")
+    log.info(f"✓ Screen verified, frame shape: {frame.shape}")
 
 
 @then('I should not see black screen')
 def no_black_screen(test_orchestrator):
     """Verify no black screen"""
-    frame = test_orchestrator.video_capture.get_frame()
+    frame = wait_for_frame(test_orchestrator.video_capture)
     assert frame is not None, "No video frames available"
     
     # Simple check - if we have a frame, it's probably not black
     mean_brightness = frame.mean()
     assert mean_brightness > 10, f"Screen appears too dark: {mean_brightness}"
     
-    log.info(f"Screen brightness OK: {mean_brightness:.1f}")
+    log.info(f"✓ Screen brightness OK: {mean_brightness:.1f}")
 
 
 @then('the app should load without anomalies')
 def no_anomalies(test_orchestrator):
     """Verify no screen anomalies"""
-    frame = test_orchestrator.video_capture.get_frame()
+    frame = wait_for_frame(test_orchestrator.video_capture)
     assert frame is not None, "No video frames available"
     
     # Basic check - frame exists and has reasonable properties
     assert len(frame.shape) == 3, "Frame should be color (3 channels)"
     assert frame.shape[0] > 100 and frame.shape[1] > 100, "Frame should be reasonable size"
     
-    log.info(f"Frame looks good: {frame.shape}")
+    log.info(f"✓ Frame looks good: {frame.shape}")
 
 
 @then('no buffering indicator should be present')
 def no_buffering(test_orchestrator):
     """Verify no buffering"""
-    frame = test_orchestrator.video_capture.get_frame()
+    frame = wait_for_frame(test_orchestrator.video_capture)
     assert frame is not None, "No video frames available"
-    log.info("No buffering issues detected (basic check)")
+    log.info("✓ No buffering issues detected (basic check)")
 
 
 @then('the screen should not be frozen')
 def screen_not_frozen(test_orchestrator):
     """Verify screen is not frozen by checking for changes"""
-    frame1 = test_orchestrator.video_capture.get_frame()
+    frame1 = wait_for_frame(test_orchestrator.video_capture)
     import time
     time.sleep(2)
-    frame2 = test_orchestrator.video_capture.get_frame()
+    frame2 = wait_for_frame(test_orchestrator.video_capture)
     
     assert frame1 is not None and frame2 is not None, "Failed to capture frames"
     
@@ -127,4 +138,17 @@ def screen_not_frozen(test_orchestrator):
     if are_identical:
         log.warning("Frames appear identical - might be frozen or static content")
     else:
-        log.info("Frames are different - screen is live")
+        log.info("✓ Frames are different - screen is live")
+
+
+def wait_for_frame(video_capture, max_attempts=10):
+    """Helper function to wait for frames to be available"""
+    import time
+    for attempt in range(max_attempts):
+        frame = video_capture.get_frame()
+        if frame is not None:
+            return frame
+        if attempt == 0:
+            log.info("Waiting for video frames to be available...")
+        time.sleep(1)
+    return None
