@@ -71,6 +71,19 @@ class PlatformOrchestrator:
                     if not self.video_capture.start():
                         log.error("All video capture methods failed")
                         return False
+                    
+                # Give video capture additional time to start producing frames
+                log.info("Verifying video capture is producing frames...")
+                import time
+                for attempt in range(10):  # Wait up to 10 seconds
+                    frame = self.video_capture.get_frame()
+                    if frame is not None:
+                        log.info(f"✓ Video capture verified, frame shape: {frame.shape}")
+                        break
+                    time.sleep(1)
+                    log.info(f"Waiting for video frames... attempt {attempt + 1}/10")
+                else:
+                    log.warning("Video capture started but no frames available yet (may work later)")
                 
             # Initialize vision agent
             if not await self.vision_agent.initialize():

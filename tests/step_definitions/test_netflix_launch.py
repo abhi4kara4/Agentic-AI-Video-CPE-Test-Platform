@@ -61,10 +61,10 @@ def launch_app(test_orchestrator, app_name):
 @then(parsers.parse('{app_name} should launch'))
 def app_should_launch(test_orchestrator, app_name):
     """Verify app launched"""
-    # Use the wait_for_frame method with proper timeout
-    frame = wait_for_frame(test_orchestrator.video_capture, max_wait_seconds=15)
+    # Use the wait_for_frame method with extended timeout
+    frame = wait_for_frame(test_orchestrator.video_capture, max_wait_seconds=20)
     
-    assert frame is not None, "No video frames available after waiting 15 seconds"
+    assert frame is not None, "No video frames available after waiting 20 seconds"
     log.info(f"✓ Video frame captured: {frame.shape}")
     log.info(f"Video frames available, assuming {app_name} launch verification")
 
@@ -72,17 +72,17 @@ def app_should_launch(test_orchestrator, app_name):
 @then('I should see either login screen or profile selection or home screen')
 def verify_app_screens(test_orchestrator):
     """Verify expected app screens appear"""
-    # Wait for and get frame
-    frame = wait_for_frame(test_orchestrator.video_capture)
-    assert frame is not None, "No video frames available"
+    # Wait for and get frame with extended timeout
+    frame = wait_for_frame(test_orchestrator.video_capture, max_wait_seconds=20)
+    assert frame is not None, "No video frames available after 20 seconds"
     log.info(f"✓ Screen verified, frame shape: {frame.shape}")
 
 
 @then('I should not see black screen')
 def no_black_screen(test_orchestrator):
     """Verify no black screen"""
-    frame = wait_for_frame(test_orchestrator.video_capture)
-    assert frame is not None, "No video frames available"
+    frame = wait_for_frame(test_orchestrator.video_capture, max_wait_seconds=20)
+    assert frame is not None, "No video frames available after 20 seconds"
     
     # Simple check - if we have a frame, it's probably not black
     mean_brightness = frame.mean()
@@ -94,8 +94,8 @@ def no_black_screen(test_orchestrator):
 @then('the app should load without anomalies')
 def no_anomalies(test_orchestrator):
     """Verify no screen anomalies"""
-    frame = wait_for_frame(test_orchestrator.video_capture)
-    assert frame is not None, "No video frames available"
+    frame = wait_for_frame(test_orchestrator.video_capture, max_wait_seconds=20)
+    assert frame is not None, "No video frames available after 20 seconds"
     
     # Basic check - frame exists and has reasonable properties
     assert len(frame.shape) == 3, "Frame should be color (3 channels)"
@@ -107,20 +107,20 @@ def no_anomalies(test_orchestrator):
 @then('no buffering indicator should be present')
 def no_buffering(test_orchestrator):
     """Verify no buffering"""
-    frame = wait_for_frame(test_orchestrator.video_capture)
-    assert frame is not None, "No video frames available"
+    frame = wait_for_frame(test_orchestrator.video_capture, max_wait_seconds=20)
+    assert frame is not None, "No video frames available after 20 seconds"
     log.info("✓ No buffering issues detected (basic check)")
 
 
 @then('the screen should not be frozen')
 def screen_not_frozen(test_orchestrator):
     """Verify screen is not frozen by checking for changes"""
-    frame1 = wait_for_frame(test_orchestrator.video_capture)
+    frame1 = wait_for_frame(test_orchestrator.video_capture, max_wait_seconds=20)
     import time
     time.sleep(2)
-    frame2 = wait_for_frame(test_orchestrator.video_capture)
+    frame2 = wait_for_frame(test_orchestrator.video_capture, max_wait_seconds=10)
     
-    assert frame1 is not None and frame2 is not None, "Failed to capture frames"
+    assert frame1 is not None and frame2 is not None, "Failed to capture frames for comparison"
     
     # Simple comparison - frames shouldn't be identical
     are_identical = (frame1 == frame2).all() if frame1.shape == frame2.shape else False

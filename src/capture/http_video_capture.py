@@ -38,25 +38,33 @@ class HttpVideoCapture:
             self._thread.start()
             
             # Wait for frames to be available before returning
-            max_wait_time = 15  # seconds
-            wait_interval = 0.5
+            max_wait_time = 30  # seconds - increased timeout
+            wait_interval = 0.2  # smaller intervals for more responsive checking
             elapsed = 0
             
-            log.info("Waiting for video frames to be available...")
+            log.info("Waiting for HTTP video frames to be available...")
             while elapsed < max_wait_time:
                 time.sleep(wait_interval)
                 elapsed += wait_interval
                 
-                # Check if we have frames
-                if self.last_frame is not None or not self.frame_queue.empty():
+                # Check if we have frames - check both queue and last_frame
+                has_queued_frame = False
+                try:
+                    # Peek at queue without removing frame
+                    if not self.frame_queue.empty():
+                        has_queued_frame = True
+                except:
+                    pass
+                
+                if self.last_frame is not None or has_queued_frame:
                     log.info(f"✓ HTTP video capture started and frames available after {elapsed:.1f}s")
                     return True
                 
-                if elapsed % 2 == 0:  # Log every 2 seconds
-                    log.info(f"Still waiting for frames... ({elapsed:.1f}s)")
+                if elapsed % 3 == 0:  # Log every 3 seconds
+                    log.info(f"Still waiting for frames... ({elapsed:.1f}s) - queue size: {self.frame_queue.qsize()}")
             
             log.warning(f"HTTP video capture started but no frames after {max_wait_time}s")
-            return True  # Still return True as capture is running
+            return False  # Return False if no frames after timeout
             
         except Exception as e:
             log.error(f"Error starting HTTP video capture: {e}")
@@ -68,10 +76,14 @@ class HttpVideoCapture:
         asyncio.set_event_loop(self._loop)
         
         try:
+            log.info("Starting HTTP video capture async loop")
             self._loop.run_until_complete(self._capture_loop())
         except Exception as e:
             log.error(f"Error in capture loop: {e}")
+            import traceback
+            traceback.print_exc()
         finally:
+            log.info("HTTP video capture async loop ended")
             self._loop.close()
     
     async def _capture_loop(self):
@@ -90,9 +102,12 @@ class HttpVideoCapture:
         
         timeout = aiohttp.ClientTimeout(total=30, connect=10)
         
+        log.info("Setting up HTTP session for video capture")
         async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
             self.session = session
+            log.info("HTTP session created, starting capture loop")
             
+            frame_count = 0
             while self.is_running:
                 current_time = time.time()
                 
@@ -106,6 +121,14 @@ class HttpVideoCapture:
                     frame = await self._capture_frame_http(session)
                     
                     if frame is not None:
+                        frame_count += 1
+                        
+                        # Log first few frames for debugging
+                        if frame_count <= 3:
+                            log.info(f"✓ Captured frame #{frame_count}: {frame.shape}")
+                        elif frame_count == 10:
+                            log.info(f"✓ HTTP capture working normally, captured {frame_count} frames")
+                        
                         # Update FPS counter
                         fps_counter += 1
                         if current_time - fps_start_time >= 1.0:
@@ -126,7 +149,8 @@ class HttpVideoCapture:
                         self.frame_queue.put(frame)
                         last_capture_time = current_time
                     else:
-                        log.warning("Failed to capture frame via HTTP")
+                        if frame_count == 0:
+                            log.warning("Still waiting for first frame via HTTP...")
                         await asyncio.sleep(0.1)
                         
                 except Exception as e:
