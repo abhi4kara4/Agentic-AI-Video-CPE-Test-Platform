@@ -26,7 +26,8 @@ def test_orchestrator(event_loop):
     
     # Initialize
     async def init():
-        if not await orchestrator.initialize():
+        # For tests, don't require device lock (development mode)
+        if not await orchestrator.initialize(require_device_lock=False):
             pytest.fail("Failed to initialize test orchestrator")
         return orchestrator
     
