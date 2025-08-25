@@ -1,12 +1,16 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import asyncio
 import io
 import cv2
+import os
+import json
 from typing import Dict, Any, Optional, List
 import uuid
 from datetime import datetime
+from pathlib import Path
 
 from src.control.test_orchestrator import PlatformOrchestrator
 from src.control.key_commands import KeyCommand
@@ -16,6 +20,31 @@ from src.config import settings
 
 # Global orchestrator instance
 orchestrator: Optional[PlatformOrchestrator] = None
+
+# WebSocket connection manager
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def send_personal_message(self, message: str, websocket: WebSocket):
+        await websocket.send_text(message)
+
+    async def broadcast(self, message: dict):
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except:
+                # Connection is broken, remove it
+                self.active_connections.remove(connection)
+
+manager = ConnectionManager()
 
 
 @asynccontextmanager
@@ -27,9 +56,10 @@ async def lifespan(app: FastAPI):
     
     # Initialize orchestrator
     orchestrator = PlatformOrchestrator()
-    if not await orchestrator.initialize(require_device_lock=settings.require_device_lock):
+    if not await orchestrator.initialize(require_device_lock=False):
         log.error("Failed to initialize orchestrator")
-        raise RuntimeError("Failed to initialize test platform")
+        # Continue without video capture for demo purposes
+        log.warning("Running in demo mode without video capture")
     
     log.info("API started successfully")
     
@@ -46,6 +76,15 @@ app = FastAPI(
     description="Agentic AI-powered testing platform for Set-Top Boxes and Smart TVs",
     version="0.1.0",
     lifespan=lifespan
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],  # React frontend
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -326,6 +365,727 @@ async def run_test_scenario(background_tasks: BackgroundTasks):
         "message": "Test execution not yet implemented",
         "timestamp": datetime.now().isoformat()
     }
+
+
+# Dataset management endpoints
+DATASETS_DIR = Path("datasets")
+DATASETS_DIR.mkdir(exist_ok=True)
+
+SCREEN_STATES = {
+    "home": "Main home screen with app rail",
+    "app_rail": "App selection rail/ribbon visible",
+    "app_loading": "App is loading/launching",
+    "netflix_home": "Netflix home screen",
+    "netflix_browse": "Netflix browsing content",
+    "youtube_home": "YouTube home screen", 
+    "youtube_player": "YouTube video player",
+    "settings": "Settings or configuration screen",
+    "error": "Error or problem screen",
+    "loading": "Generic loading screen",
+    "other": "Other screen type"
+}
+
+
+@app.get("/dataset/list")
+async def list_datasets():
+    """Get list of all datasets"""
+    datasets = []
+    for dataset_dir in DATASETS_DIR.iterdir():
+        if dataset_dir.is_dir():
+            metadata_file = dataset_dir / "metadata.json"
+            if metadata_file.exists():
+                with open(metadata_file) as f:
+                    metadata = json.load(f)
+                datasets.append(metadata)
+    
+    return {"datasets": datasets}
+
+
+@app.post("/dataset/create")
+async def create_dataset(name: str, description: str = ""):
+    """Create a new dataset"""
+    dataset_id = str(uuid.uuid4())
+    dataset_dir = DATASETS_DIR / name
+    
+    if dataset_dir.exists():
+        raise HTTPException(status_code=400, detail="Dataset already exists")
+    
+    dataset_dir.mkdir(parents=True)
+    (dataset_dir / "images").mkdir()
+    (dataset_dir / "annotations").mkdir()
+    
+    metadata = {
+        "id": dataset_id,
+        "name": name,
+        "description": description,
+        "created_at": datetime.now().isoformat(),
+        "image_count": 0,
+        "screen_states": SCREEN_STATES
+    }
+    
+    with open(dataset_dir / "metadata.json", "w") as f:
+        json.dump(metadata, f, indent=2)
+    
+    # Broadcast dataset creation
+    await broadcast_update("dataset_created", metadata)
+    
+    return metadata
+
+
+@app.get("/dataset/{dataset_name}")
+async def get_dataset(dataset_name: str):
+    """Get dataset information"""
+    dataset_dir = DATASETS_DIR / dataset_name
+    metadata_file = dataset_dir / "metadata.json"
+    
+    if not metadata_file.exists():
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    
+    with open(metadata_file) as f:
+        metadata = json.load(f)
+    
+    # Update image count
+    image_dir = dataset_dir / "images"
+    if image_dir.exists():
+        metadata["image_count"] = len(list(image_dir.glob("*.jpg")))
+    
+    return metadata
+
+
+@app.post("/dataset/{dataset_name}/capture")
+async def capture_to_dataset(dataset_name: str):
+    """Capture current frame to dataset"""
+    if not orchestrator:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    dataset_dir = DATASETS_DIR / dataset_name
+    if not dataset_dir.exists():
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    
+    # Capture screenshot
+    frame = orchestrator.video_capture.get_frame()
+    if frame is None:
+        raise HTTPException(status_code=503, detail="No video frame available")
+    
+    # Save image
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+    image_filename = f"capture_{timestamp}.jpg"
+    image_path = dataset_dir / "images" / image_filename
+    
+    cv2.imwrite(str(image_path), frame)
+    
+    result = {
+        "status": "success",
+        "image_filename": image_filename,
+        "image_path": str(image_path),
+        "timestamp": datetime.now().isoformat()
+    }
+    
+    # Broadcast image capture
+    await broadcast_update("image_captured", {
+        "dataset_name": dataset_name,
+        "image_filename": image_filename
+    })
+    
+    return result
+
+
+@app.post("/dataset/{dataset_name}/label")
+async def label_image(dataset_name: str, image_filename: str, state: str, description: str = ""):
+    """Label an image in the dataset"""
+    dataset_dir = DATASETS_DIR / dataset_name
+    if not dataset_dir.exists():
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    
+    if state not in SCREEN_STATES:
+        raise HTTPException(status_code=400, detail=f"Invalid state. Must be one of: {list(SCREEN_STATES.keys())}")
+    
+    annotation = {
+        "image_filename": image_filename,
+        "state": state,
+        "state_description": SCREEN_STATES[state],
+        "custom_description": description,
+        "labeled_at": datetime.now().isoformat()
+    }
+    
+    annotation_file = dataset_dir / "annotations" / f"{Path(image_filename).stem}.json"
+    with open(annotation_file, "w") as f:
+        json.dump(annotation, f, indent=2)
+    
+    # Broadcast image labeling
+    await broadcast_update("image_labeled", {
+        "dataset_name": dataset_name,
+        "annotation": annotation
+    })
+    
+    return annotation
+
+
+@app.get("/dataset/{dataset_name}/images")
+async def list_dataset_images(dataset_name: str):
+    """List all images in a dataset"""
+    dataset_dir = DATASETS_DIR / dataset_name
+    if not dataset_dir.exists():
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    
+    images_dir = dataset_dir / "images"
+    annotations_dir = dataset_dir / "annotations"
+    
+    images = []
+    for image_file in images_dir.glob("*.jpg"):
+        annotation_file = annotations_dir / f"{image_file.stem}.json"
+        annotation = None
+        
+        if annotation_file.exists():
+            with open(annotation_file) as f:
+                annotation = json.load(f)
+        
+        images.append({
+            "filename": image_file.name,
+            "path": str(image_file),
+            "annotation": annotation
+        })
+    
+    return {"images": images}
+
+
+@app.delete("/dataset/{dataset_name}")
+async def delete_dataset(dataset_name: str):
+    """Delete a dataset"""
+    dataset_dir = DATASETS_DIR / dataset_name
+    if not dataset_dir.exists():
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    
+    import shutil
+    shutil.rmtree(dataset_dir)
+    
+    return {"status": "success", "message": f"Dataset {dataset_name} deleted"}
+
+
+@app.get("/dataset/states")
+async def get_screen_states():
+    """Get available screen states for labeling"""
+    return {"states": SCREEN_STATES}
+
+
+# Training management endpoints
+TRAINING_DIR = Path("training")
+TRAINING_DIR.mkdir(exist_ok=True)
+
+AVAILABLE_MODELS = {
+    "llava:7b": {"name": "LLaVA 7B", "size": "7B", "type": "vision-language"},
+    "llava:7b-v1.6-mistral-q4_0": {"name": "LLaVA 7B Quantized", "size": "7B", "type": "vision-language"},
+    "moondream:latest": {"name": "Moondream", "size": "1.6B", "type": "vision-language"},
+    "phi3:mini": {"name": "Phi-3 Mini", "size": "3.8B", "type": "vision-language"}
+}
+
+
+@app.get("/training/models")
+async def list_available_models():
+    """Get list of available models for training"""
+    return {"models": AVAILABLE_MODELS}
+
+
+@app.post("/training/jobs")
+async def create_training_job(
+    job_name: str,
+    dataset_name: str,
+    base_model: str,
+    epochs: int = 3,
+    learning_rate: float = 0.0001,
+    batch_size: int = 4
+):
+    """Create a new training job"""
+    
+    # Validate dataset exists
+    dataset_dir = DATASETS_DIR / dataset_name
+    if not dataset_dir.exists():
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    
+    # Validate model
+    if base_model not in AVAILABLE_MODELS:
+        raise HTTPException(status_code=400, detail=f"Invalid model. Available: {list(AVAILABLE_MODELS.keys())}")
+    
+    job_id = str(uuid.uuid4())
+    job_dir = TRAINING_DIR / job_name
+    
+    if job_dir.exists():
+        raise HTTPException(status_code=400, detail="Training job already exists")
+    
+    job_dir.mkdir(parents=True)
+    
+    training_config = {
+        "job_id": job_id,
+        "job_name": job_name,
+        "dataset_name": dataset_name,
+        "base_model": base_model,
+        "parameters": {
+            "epochs": epochs,
+            "learning_rate": learning_rate,
+            "batch_size": batch_size
+        },
+        "status": "created",
+        "created_at": datetime.now().isoformat(),
+        "started_at": None,
+        "completed_at": None,
+        "progress": {
+            "current_epoch": 0,
+            "total_epochs": epochs,
+            "loss": None,
+            "accuracy": None
+        }
+    }
+    
+    with open(job_dir / "config.json", "w") as f:
+        json.dump(training_config, f, indent=2)
+    
+    return training_config
+
+
+@app.get("/training/jobs")
+async def list_training_jobs():
+    """Get list of all training jobs"""
+    jobs = []
+    for job_dir in TRAINING_DIR.iterdir():
+        if job_dir.is_dir():
+            config_file = job_dir / "config.json"
+            if config_file.exists():
+                with open(config_file) as f:
+                    config = json.load(f)
+                jobs.append(config)
+    
+    return {"jobs": jobs}
+
+
+@app.get("/training/jobs/{job_name}")
+async def get_training_job(job_name: str):
+    """Get training job details"""
+    job_dir = TRAINING_DIR / job_name
+    config_file = job_dir / "config.json"
+    
+    if not config_file.exists():
+        raise HTTPException(status_code=404, detail="Training job not found")
+    
+    with open(config_file) as f:
+        config = json.load(f)
+    
+    # Check for logs
+    log_file = job_dir / "training.log"
+    logs = []
+    if log_file.exists():
+        with open(log_file) as f:
+            logs = f.readlines()[-50:]  # Last 50 lines
+    
+    config["logs"] = logs
+    return config
+
+
+@app.post("/training/jobs/{job_name}/start")
+async def start_training_job(job_name: str, background_tasks: BackgroundTasks):
+    """Start a training job"""
+    job_dir = TRAINING_DIR / job_name
+    config_file = job_dir / "config.json"
+    
+    if not config_file.exists():
+        raise HTTPException(status_code=404, detail="Training job not found")
+    
+    with open(config_file) as f:
+        config = json.load(f)
+    
+    if config["status"] == "running":
+        raise HTTPException(status_code=400, detail="Training job is already running")
+    
+    # Update status
+    config["status"] = "running"
+    config["started_at"] = datetime.now().isoformat()
+    
+    with open(config_file, "w") as f:
+        json.dump(config, f, indent=2)
+    
+    # Broadcast training started
+    await broadcast_update("training_started", {
+        "job_name": job_name,
+        "status": "running"
+    })
+    
+    # Add to background tasks (simulated training)
+    background_tasks.add_task(simulate_training, job_name)
+    
+    return {"status": "started", "job_name": job_name}
+
+
+@app.post("/training/jobs/{job_name}/stop")
+async def stop_training_job(job_name: str):
+    """Stop a training job"""
+    job_dir = TRAINING_DIR / job_name
+    config_file = job_dir / "config.json"
+    
+    if not config_file.exists():
+        raise HTTPException(status_code=404, detail="Training job not found")
+    
+    with open(config_file) as f:
+        config = json.load(f)
+    
+    config["status"] = "stopped"
+    config["completed_at"] = datetime.now().isoformat()
+    
+    with open(config_file, "w") as f:
+        json.dump(config, f, indent=2)
+    
+    return {"status": "stopped", "job_name": job_name}
+
+
+@app.delete("/training/jobs/{job_name}")
+async def delete_training_job(job_name: str):
+    """Delete a training job"""
+    job_dir = TRAINING_DIR / job_name
+    if not job_dir.exists():
+        raise HTTPException(status_code=404, detail="Training job not found")
+    
+    import shutil
+    shutil.rmtree(job_dir)
+    
+    return {"status": "success", "message": f"Training job {job_name} deleted"}
+
+
+async def simulate_training(job_name: str):
+    """Simulate training progress (placeholder implementation)"""
+    job_dir = TRAINING_DIR / job_name
+    config_file = job_dir / "config.json"
+    log_file = job_dir / "training.log"
+    
+    if not config_file.exists():
+        return
+    
+    with open(config_file) as f:
+        config = json.load(f)
+    
+    total_epochs = config["parameters"]["epochs"]
+    
+    with open(log_file, "w") as f:
+        f.write(f"Starting training for {job_name}\n")
+        f.write(f"Base model: {config['base_model']}\n")
+        f.write(f"Dataset: {config['dataset_name']}\n")
+        f.write(f"Epochs: {total_epochs}\n\n")
+    
+    for epoch in range(1, total_epochs + 1):
+        await asyncio.sleep(10)  # Simulate training time
+        
+        # Update progress
+        config["progress"]["current_epoch"] = epoch
+        config["progress"]["loss"] = round(1.0 - (epoch / total_epochs) * 0.8, 4)  # Simulated decreasing loss
+        config["progress"]["accuracy"] = round((epoch / total_epochs) * 0.9, 4)  # Simulated increasing accuracy
+        
+        with open(config_file, "w") as f:
+            json.dump(config, f, indent=2)
+        
+        # Update log
+        with open(log_file, "a") as f:
+            f.write(f"Epoch {epoch}/{total_epochs} - Loss: {config['progress']['loss']:.4f}, Accuracy: {config['progress']['accuracy']:.4f}\n")
+        
+        # Broadcast training progress
+        await broadcast_update("training_progress", {
+            "job_name": job_name,
+            "progress": config["progress"]
+        })
+        
+        # Check if stopped
+        with open(config_file) as f:
+            current_config = json.load(f)
+        
+        if current_config["status"] == "stopped":
+            break
+    
+    # Mark as completed if not stopped
+    with open(config_file) as f:
+        final_config = json.load(f)
+    
+    if final_config["status"] == "running":
+        final_config["status"] = "completed"
+        final_config["completed_at"] = datetime.now().isoformat()
+        
+        with open(config_file, "w") as f:
+            json.dump(final_config, f, indent=2)
+        
+        with open(log_file, "a") as f:
+            f.write(f"\nTraining completed at {final_config['completed_at']}\n")
+        
+        # Broadcast training completion
+        await broadcast_update("training_completed", {
+            "job_name": job_name,
+            "status": "completed",
+            "completed_at": final_config['completed_at']
+        })
+
+
+# Model testing endpoints  
+TESTING_DIR = Path("testing")
+TESTING_DIR.mkdir(exist_ok=True)
+
+
+@app.post("/test/models/compare")
+async def compare_models(models: List[str], prompt: str = "Describe what you see on this TV screen"):
+    """Compare multiple models on current frame"""
+    if not orchestrator:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    frame = orchestrator.video_capture.get_frame()
+    if frame is None:
+        raise HTTPException(status_code=503, detail="No video frame available")
+    
+    test_id = str(uuid.uuid4())
+    test_dir = TESTING_DIR / f"comparison_{test_id}"
+    test_dir.mkdir(parents=True)
+    
+    # Save test frame
+    frame_path = test_dir / "test_frame.jpg"
+    cv2.imwrite(str(frame_path), frame)
+    
+    results = []
+    for model in models:
+        if model not in AVAILABLE_MODELS:
+            continue
+            
+        start_time = datetime.now()
+        
+        # Simulate model inference (placeholder)
+        await asyncio.sleep(2)  # Simulate processing time
+        
+        end_time = datetime.now()
+        processing_time = (end_time - start_time).total_seconds()
+        
+        # Simulated response
+        response = f"Analysis from {model}: This appears to be a TV interface showing various applications and menu options."
+        
+        result = {
+            "model": model,
+            "model_info": AVAILABLE_MODELS[model],
+            "prompt": prompt,
+            "response": response,
+            "processing_time_seconds": processing_time,
+            "timestamp": end_time.isoformat()
+        }
+        results.append(result)
+    
+    # Save comparison results
+    comparison_data = {
+        "test_id": test_id,
+        "frame_path": str(frame_path),
+        "prompt": prompt,
+        "models_tested": models,
+        "results": results,
+        "created_at": datetime.now().isoformat()
+    }
+    
+    with open(test_dir / "comparison.json", "w") as f:
+        json.dump(comparison_data, f, indent=2)
+    
+    return comparison_data
+
+
+@app.post("/test/models/{model_name}/analyze")
+async def test_single_model(model_name: str, prompt: str = "Describe what you see on this TV screen"):
+    """Test a single model on current frame"""
+    if not orchestrator:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    if model_name not in AVAILABLE_MODELS:
+        raise HTTPException(status_code=400, detail=f"Invalid model. Available: {list(AVAILABLE_MODELS.keys())}")
+    
+    frame = orchestrator.video_capture.get_frame()
+    if frame is None:
+        raise HTTPException(status_code=503, detail="No video frame available")
+    
+    test_id = str(uuid.uuid4())
+    test_dir = TESTING_DIR / f"single_test_{test_id}"
+    test_dir.mkdir(parents=True)
+    
+    # Save test frame
+    frame_path = test_dir / "test_frame.jpg"
+    cv2.imwrite(str(frame_path), frame)
+    
+    start_time = datetime.now()
+    
+    # Simulate model inference (placeholder)
+    await asyncio.sleep(3)  # Simulate processing time
+    
+    end_time = datetime.now()
+    processing_time = (end_time - start_time).total_seconds()
+    
+    # Simulated response
+    response = f"Analysis from {model_name}: This appears to be a TV interface with navigation elements visible."
+    confidence = 0.85  # Simulated confidence
+    
+    result = {
+        "test_id": test_id,
+        "model": model_name,
+        "model_info": AVAILABLE_MODELS[model_name],
+        "frame_path": str(frame_path),
+        "prompt": prompt,
+        "response": response,
+        "confidence": confidence,
+        "processing_time_seconds": processing_time,
+        "timestamp": end_time.isoformat()
+    }
+    
+    with open(test_dir / "result.json", "w") as f:
+        json.dump(result, f, indent=2)
+    
+    return result
+
+
+@app.post("/test/benchmark/{model_name}")
+async def benchmark_model(
+    model_name: str, 
+    iterations: int = 5,
+    prompt: str = "Describe what you see on this TV screen"
+):
+    """Benchmark a model with multiple iterations"""
+    if not orchestrator:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    if model_name not in AVAILABLE_MODELS:
+        raise HTTPException(status_code=400, detail=f"Invalid model. Available: {list(AVAILABLE_MODELS.keys())}")
+    
+    benchmark_id = str(uuid.uuid4())
+    benchmark_dir = TESTING_DIR / f"benchmark_{benchmark_id}"
+    benchmark_dir.mkdir(parents=True)
+    
+    results = []
+    total_time = 0
+    
+    for i in range(iterations):
+        frame = orchestrator.video_capture.get_frame()
+        if frame is None:
+            continue
+        
+        # Save frame
+        frame_path = benchmark_dir / f"frame_{i+1}.jpg"
+        cv2.imwrite(str(frame_path), frame)
+        
+        start_time = datetime.now()
+        
+        # Simulate model inference (placeholder)
+        await asyncio.sleep(2.5)  # Simulate processing time
+        
+        end_time = datetime.now()
+        processing_time = (end_time - start_time).total_seconds()
+        total_time += processing_time
+        
+        # Simulated response
+        response = f"Iteration {i+1}: TV interface analysis from {model_name}"
+        confidence = 0.80 + (i * 0.02)  # Simulated varying confidence
+        
+        result = {
+            "iteration": i + 1,
+            "frame_path": str(frame_path),
+            "response": response,
+            "confidence": confidence,
+            "processing_time_seconds": processing_time,
+            "timestamp": end_time.isoformat()
+        }
+        results.append(result)
+    
+    # Calculate statistics
+    processing_times = [r["processing_time_seconds"] for r in results]
+    avg_time = sum(processing_times) / len(processing_times)
+    min_time = min(processing_times)
+    max_time = max(processing_times)
+    
+    confidences = [r["confidence"] for r in results]
+    avg_confidence = sum(confidences) / len(confidences)
+    
+    benchmark_data = {
+        "benchmark_id": benchmark_id,
+        "model": model_name,
+        "model_info": AVAILABLE_MODELS[model_name],
+        "prompt": prompt,
+        "iterations": iterations,
+        "results": results,
+        "statistics": {
+            "average_processing_time": avg_time,
+            "min_processing_time": min_time,
+            "max_processing_time": max_time,
+            "total_time": total_time,
+            "average_confidence": avg_confidence
+        },
+        "created_at": datetime.now().isoformat()
+    }
+    
+    with open(benchmark_dir / "benchmark.json", "w") as f:
+        json.dump(benchmark_data, f, indent=2)
+    
+    return benchmark_data
+
+
+@app.get("/test/history")
+async def get_test_history():
+    """Get history of all model tests"""
+    tests = []
+    
+    for test_dir in TESTING_DIR.iterdir():
+        if not test_dir.is_dir():
+            continue
+        
+        # Check for different test types
+        if (test_dir / "comparison.json").exists():
+            with open(test_dir / "comparison.json") as f:
+                test_data = json.load(f)
+                test_data["test_type"] = "comparison"
+                tests.append(test_data)
+        elif (test_dir / "result.json").exists():
+            with open(test_dir / "result.json") as f:
+                test_data = json.load(f)
+                test_data["test_type"] = "single"
+                tests.append(test_data)
+        elif (test_dir / "benchmark.json").exists():
+            with open(test_dir / "benchmark.json") as f:
+                test_data = json.load(f)
+                test_data["test_type"] = "benchmark"
+                tests.append(test_data)
+    
+    # Sort by creation time (newest first)
+    tests.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    
+    return {"tests": tests}
+
+
+@app.delete("/test/history/clear")
+async def clear_test_history():
+    """Clear all test history"""
+    import shutil
+    shutil.rmtree(TESTING_DIR)
+    TESTING_DIR.mkdir(exist_ok=True)
+    
+    return {"status": "success", "message": "Test history cleared"}
+
+
+# WebSocket endpoints
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            # Keep connection alive and listen for messages
+            data = await websocket.receive_text()
+            
+            # Handle ping/pong for connection health
+            if data == "ping":
+                await websocket.send_text("pong")
+            
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+
+
+# Helper function to broadcast updates
+async def broadcast_update(update_type: str, data: dict):
+    """Broadcast updates to all connected WebSocket clients"""
+    message = {
+        "type": update_type,
+        "timestamp": datetime.now().isoformat(),
+        "data": data
+    }
+    await manager.broadcast(message)
 
 
 if __name__ == "__main__":

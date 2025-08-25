@@ -207,10 +207,12 @@ async def test_ollama():
         fastest = min(all_results, key=lambda x: x.get("average_time", float('inf')))
         log.info(f"\n🏆 Fastest model: {fastest['model']} ({fastest['average_time']:.1f}s average)")
         
-        # Save results
-        with open("model_performance_results.json", "w") as f:
+        # Save results to reports directory (accessible from host)
+        report_path = "reports/model_performance_results.json"
+        os.makedirs("reports", exist_ok=True)
+        with open(report_path, "w") as f:
             json.dump(all_results, f, indent=2)
-        log.info("\n💾 Results saved to model_performance_results.json")
+        log.info(f"\n💾 Results saved to {report_path}")
     
     return True
 

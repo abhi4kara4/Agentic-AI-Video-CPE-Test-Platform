@@ -68,3 +68,18 @@ Thumbs.db
 
 # Ollama models (if stored locally)
 models/
+
+# Archive folder
+Archive/
+
+# Training and testing data
+datasets/
+training/
+testing/
+
+# Frontend build
+frontend/dist/
+frontend/node_modules/
+
+# Demo environment
+.env.demo

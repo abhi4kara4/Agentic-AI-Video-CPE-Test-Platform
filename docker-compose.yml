@@ -1,7 +1,7 @@
 services:
   # Ollama service for running LLaVA model
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.1.32
     container_name: ai-test-ollama
     volumes:
       - ollama_data:/root/.ollama
@@ -82,6 +82,25 @@ services:
       - API_URL=http://app:8000
       - PYTHONUNBUFFERED=1
     command: tail -f /dev/null  # Keep container running for manual test execution
+    restart: unless-stopped
+
+  # Frontend service
+  frontend:
+    build: 
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: ai-test-frontend
+    depends_on:
+      - app
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+    environment:
+      - VITE_API_URL=http://localhost:8000
+      - CHOKIDAR_USEPOLLING=true
+    command: npm start
     restart: unless-stopped
 
 volumes:

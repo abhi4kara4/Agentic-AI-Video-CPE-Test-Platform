@@ -305,10 +305,12 @@ async def main():
             log.info(f"⚠️  Even the fastest model ({fastest['model']}) is too slow")
             log.info(f"   Consider using cloud GPU or dedicated inference server")
         
-        # Save results
-        with open("fast_model_benchmarks.json", "w") as f:
+        # Save results to reports directory (accessible from host)
+        report_path = "reports/fast_model_benchmarks.json"
+        os.makedirs("reports", exist_ok=True)
+        with open(report_path, "w") as f:
             json.dump(all_results, f, indent=2)
-        log.info("\n💾 Detailed results saved to fast_model_benchmarks.json")
+        log.info(f"\n💾 Detailed results saved to {report_path}")
     
     return True
 
