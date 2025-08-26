@@ -19,9 +19,9 @@ class PlatformOrchestrator:
     def __init__(self, mac_address: Optional[str] = None):
         self.device_controller = DeviceController(mac_address)
         
-        # Always try OpenCV first (better for video streams)
-        log.info("Using OpenCV video capture")
-        self.video_capture = VideoCapture()
+        # Go directly to HTTP capture for MJPEG streams
+        log.info("Using HTTP video capture for MJPEG stream")
+        self.video_capture = HttpVideoCapture()
             
         self.vision_agent = VisionAgent()
         self.current_state = "unknown"
@@ -58,19 +58,8 @@ class PlatformOrchestrator:
                     log.warning("Stream connectivity test failed, but continuing anyway")
                 
                 if not self.video_capture.start():
-                    log.warning("Primary video capture failed, trying fallback method")
-                    
-                    # Try alternative capture method
-                    if isinstance(self.video_capture, HttpVideoCapture):
-                        log.info("Falling back to OpenCV video capture")
-                        self.video_capture = VideoCapture()
-                    else:
-                        log.info("Falling back to HTTP video capture")
-                        self.video_capture = HttpVideoCapture()
-                    
-                    if not self.video_capture.start():
-                        log.error("All video capture methods failed")
-                        return False
+                    log.error("HTTP video capture failed")
+                    return False
                     
                 # Give video capture additional time to start producing frames
                 log.info("Verifying video capture is producing frames...")

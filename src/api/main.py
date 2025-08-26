@@ -114,8 +114,12 @@ async def video_stream():
         raise HTTPException(status_code=503, detail="Video capture not available")
     
     def generate_frames():
-        for frame in orchestrator.video_capture.get_frame_stream():
+        while True:
+            frame = orchestrator.video_capture.get_frame()
             if frame is None:
+                # Sleep briefly if no frame available
+                import time
+                time.sleep(0.033)  # ~30 fps
                 continue
                 
             # Encode frame as JPEG
@@ -154,6 +158,34 @@ async def video_info():
 
 
 # Device control endpoints
+@app.post("/device/lock")
+async def lock_device():
+    """Lock the device for exclusive control"""
+    if not orchestrator:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    success = await orchestrator.device_controller.lock_device()
+    
+    if not success:
+        raise HTTPException(status_code=409, detail="Device already locked or unavailable")
+    
+    return {"status": "success", "action": "device_locked", "timestamp": datetime.now().isoformat()}
+
+
+@app.post("/device/unlock")
+async def unlock_device():
+    """Unlock the device"""
+    if not orchestrator:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    success = await orchestrator.device_controller.unlock_device()
+    
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to unlock device")
+    
+    return {"status": "success", "action": "device_unlocked", "timestamp": datetime.now().isoformat()}
+
+
 @app.post("/device/key/{key_name}")
 async def press_key(key_name: str):
     """Press a key on the device"""
