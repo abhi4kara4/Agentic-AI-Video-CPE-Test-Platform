@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     development_mode: bool = True
     require_device_lock: bool = False
     skip_video_capture: bool = False
+    read_stream_on_start: bool = False  # Controls continuous stream reading
+    auto_lock_device: bool = False  # Controls automatic device locking on startup
     
     # Logging
     log_level: str = "INFO"

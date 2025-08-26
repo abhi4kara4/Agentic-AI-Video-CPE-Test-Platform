@@ -79,6 +79,38 @@ Run the test:
 docker-compose exec runner pytest tests/features/netflix_launch.feature
 ```
 
+## Configuration
+
+The platform can be configured using environment variables. Copy `.env.example` to `.env` and adjust the settings:
+
+```bash
+cp .env.example .env
+```
+
+### Key Configuration Options
+
+- **READ_STREAM_ON_START**: Set to `false` to disable continuous video stream reading on startup. Stream will only start when first frame is requested (e.g., from the Dataset Creation UI). This saves resources when not actively using the AI features.
+- **AUTO_LOCK_DEVICE**: Set to `false` to disable automatic device locking on startup. Device can still be locked manually from Dataset Creation page.
+- **SKIP_VIDEO_CAPTURE**: Set to `true` to completely skip video capture initialization
+- **DEVELOPMENT_MODE**: Enable development mode with relaxed constraints
+- **REQUIRE_DEVICE_LOCK**: Set to `false` for development without device locking
+
+### Resource Management
+
+By default, the platform now uses efficient resource management:
+
+**Stream Reading (`READ_STREAM_ON_START=false`)**:
+- Video capture initializes but doesn't continuously read frames on startup
+- Stream reading begins automatically when UI requests first frame  
+- Reduces CPU/network usage when not actively testing
+- Set to `true` for immediate continuous streaming (legacy behavior)
+
+**Device Locking (`AUTO_LOCK_DEVICE=false`)**:
+- Device remains unlocked on platform startup
+- Manual locking available through Dataset Creation page
+- Prevents conflicts when multiple users need device access
+- Set to `true` for automatic device locking on startup
+
 ## Development
 
 ### Local Setup

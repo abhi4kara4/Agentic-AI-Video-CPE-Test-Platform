@@ -38,13 +38,15 @@ class PlatformOrchestrator:
                 if not await self.device_controller.lock_device():
                     log.error("Failed to lock device")
                     return False
-            else:
+            elif settings.auto_lock_device:
                 # Try to lock but don't fail if it doesn't work
                 lock_success = await self.device_controller.lock_device()
                 if lock_success:
                     log.info("Device locked successfully")
                 else:
                     log.warning("Could not lock device, continuing without lock (development mode)")
+            else:
+                log.info("Device auto-lock disabled. Device will remain unlocked until manually locked.")
                 
             # Start video capture with fallback (unless skipped)
             if settings.skip_video_capture:
@@ -60,19 +62,23 @@ class PlatformOrchestrator:
                 if not self.video_capture.start():
                     log.error("HTTP video capture failed")
                     return False
-                    
-                # Give video capture additional time to start producing frames
-                log.info("Verifying video capture is producing frames...")
-                import time
-                for attempt in range(10):  # Wait up to 10 seconds
-                    frame = self.video_capture.get_frame()
-                    if frame is not None:
-                        log.info(f"✓ Video capture verified, frame shape: {frame.shape}")
-                        break
-                    time.sleep(1)
-                    log.info(f"Waiting for video frames... attempt {attempt + 1}/10")
+                
+                # Only start continuous reading if configured to do so
+                if settings.read_stream_on_start:
+                    # Give video capture additional time to start producing frames
+                    log.info("Verifying video capture is producing frames...")
+                    import time
+                    for attempt in range(10):  # Wait up to 10 seconds
+                        frame = self.video_capture.get_frame()
+                        if frame is not None:
+                            log.info(f"✓ Video capture verified, frame shape: {frame.shape}")
+                            break
+                        time.sleep(1)
+                        log.info(f"Waiting for video frames... attempt {attempt + 1}/10")
+                    else:
+                        log.warning("Video capture started but no frames available yet (may work later)")
                 else:
-                    log.warning("Video capture started but no frames available yet (may work later)")
+                    log.info("Stream reading on startup disabled. Video capture initialized but not actively reading frames.")
                 
             # Initialize vision agent
             if not await self.vision_agent.initialize():

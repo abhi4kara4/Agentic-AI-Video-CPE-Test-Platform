@@ -28,6 +28,7 @@ class HttpVideoCapture:
         self.fps_actual = 0
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
+        self._should_start_streaming = False  # Flag to control when to start streaming
         
     def start(self) -> bool:
         """Start video capture in a separate thread with async loop"""
@@ -36,6 +37,11 @@ class HttpVideoCapture:
             self._thread = threading.Thread(target=self._start_async_loop)
             self._thread.daemon = True
             self._thread.start()
+            
+            # If stream reading is disabled on start, just initialize but don't wait for frames
+            if not settings.read_stream_on_start:
+                log.info("HTTP video capture initialized but stream reading disabled on startup")
+                return True
             
             # Wait for frames to be available before returning
             max_wait_time = 30  # seconds - increased timeout
@@ -110,6 +116,12 @@ class HttpVideoCapture:
             frame_count = 0
             while self.is_running:
                 current_time = time.time()
+                
+                # If stream reading is disabled, wait until it's enabled
+                if not settings.read_stream_on_start and not self._should_start_streaming:
+                    # Wait in idle mode - only start capturing when first frame is requested
+                    await asyncio.sleep(0.1)
+                    continue
                 
                 # Control capture rate
                 if current_time - last_capture_time < frame_interval:
@@ -275,6 +287,11 @@ class HttpVideoCapture:
     
     def get_frame(self) -> Optional[np.ndarray]:
         """Get the latest captured frame"""
+        # If stream reading was disabled on start, enable it now on first frame request
+        if not settings.read_stream_on_start and not self._should_start_streaming:
+            log.info("First frame requested - enabling stream reading")
+            self._should_start_streaming = True
+        
         try:
             # Try to get from queue first
             frame = self.frame_queue.get_nowait()
