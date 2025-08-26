@@ -108,8 +108,10 @@ async def health_check():
 
 # Video streaming endpoints
 @app.get("/video/stream")
-async def video_stream():
+async def video_stream(device: Optional[str] = None, outlet: Optional[str] = None, resolution: Optional[str] = None):
     """Stream video frames"""
+    log.info(f"Video stream requested - device: {device}, outlet: {outlet}, resolution: {resolution}")
+    
     if not orchestrator or not orchestrator.video_capture.is_running:
         raise HTTPException(status_code=503, detail="Video capture not available")
     
