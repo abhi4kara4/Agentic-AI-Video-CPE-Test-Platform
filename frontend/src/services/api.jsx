@@ -97,6 +97,12 @@ export const datasetAPI = {
     apiClient.get(`/dataset/${datasetId}/images/${imageId}`),
   
   // Dataset operations
+  labelImage: (datasetName, imageName, screenType, notes) =>
+    apiClient.post(`/dataset/${datasetName}/label`, { 
+      image_name: imageName,
+      screen_type: screenType,
+      notes 
+    }),
   exportDataset: (datasetId, format = 'llava') => 
     apiClient.post(`/dataset/${datasetId}/export`, { format }),
   importDataset: (file, format = 'llava') => {
