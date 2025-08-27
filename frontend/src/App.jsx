@@ -34,6 +34,9 @@ import Settings from './components/Settings.jsx';
 // Import services
 import { healthAPI, wsManager } from './services/api.jsx';
 
+// Import context
+import { DatasetCreationProvider } from './context/DatasetCreationContext.jsx';
+
 // Create theme
 const theme = createTheme({
   palette: {
@@ -218,23 +221,24 @@ function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <Router>
-        <Box sx={{ display: 'flex', minHeight: '100vh' }}>
-          {/* Navigation Sidebar */}
-          <Navigation 
-            platformStatus={platformStatus}
-            wsConnected={wsConnected}
-          />
-          
-          {/* Main Content */}
-          <Box
-            component="main"
-            sx={{
-              flexGrow: 1,
-              bgcolor: 'background.default',
-              overflow: 'hidden',
-            }}
-          >
+      <DatasetCreationProvider>
+        <Router>
+          <Box sx={{ display: 'flex', minHeight: '100vh' }}>
+            {/* Navigation Sidebar */}
+            <Navigation 
+              platformStatus={platformStatus}
+              wsConnected={wsConnected}
+            />
+            
+            {/* Main Content */}
+            <Box
+              component="main"
+              sx={{
+                flexGrow: 1,
+                bgcolor: 'background.default',
+                overflow: 'hidden',
+              }}
+            >
             {/* Top App Bar */}
             <AppBar 
               position="static" 
@@ -351,7 +355,8 @@ function App() {
             </Alert>
           )}
         </Snackbar>
-      </Router>
+        </Router>
+      </DatasetCreationProvider>
     </ThemeProvider>
   );
 }

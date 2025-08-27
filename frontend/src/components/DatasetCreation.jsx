@@ -50,6 +50,7 @@ import {
   RestartAlt as ResetIcon,
 } from '@mui/icons-material';
 import { videoAPI, deviceAPI, datasetAPI } from '../services/api.jsx';
+import { useDatasetCreation } from '../context/DatasetCreationContext.jsx';
 
 // Screen state definitions
 const SCREEN_STATES = {
@@ -103,36 +104,41 @@ const savePanelSizes = (sizes) => {
 };
 
 const DatasetCreation = ({ onNotification }) => {
-  // Panel sizing state
+  // Get state from context
+  const {
+    config,
+    setConfig,
+    isInitialized,
+    setIsInitialized,
+    deviceLocked,
+    setDeviceLocked,
+    streamActive,
+    setStreamActive,
+    currentStep,
+    setCurrentStep,
+    streamUrl,
+    setStreamUrl,
+    capturedImages,
+    setCapturedImages,
+    videoInfo,
+    setVideoInfo,
+    currentDataset,
+    setCurrentDataset,
+    datasets,
+    setDatasets,
+    clearSession,
+  } = useDatasetCreation();
+
+  // Panel sizing state (still local as it's UI-specific)
   const [panelSizes, setPanelSizes] = useState(loadPanelSizes());
   const [resizing, setResizing] = useState(null);
   const resizeStartPos = useRef(null);
   const resizeStartSize = useRef(null);
 
-  // Configuration state
-  const [config, setConfig] = useState({
-    deviceId: '',
-    outlet: '5',
-    resolution: '1920x1080',
-    macAddress: '',
-    keySet: 'SKYQ',
-  });
-
-  // Platform state
-  const [isInitialized, setIsInitialized] = useState(false);
-  const [deviceLocked, setDeviceLocked] = useState(false);
-  const [streamActive, setStreamActive] = useState(false);
-  const [currentStep, setCurrentStep] = useState(0);
-
-  // Video stream
+  // Video ref
   const videoRef = useRef(null);
-  const [streamUrl, setStreamUrl] = useState('');
-  const [capturedImages, setCapturedImages] = useState([]);
-  const [videoInfo, setVideoInfo] = useState(null);
 
-  // Dataset management
-  const [currentDataset, setCurrentDataset] = useState(null);
-  const [datasets, setDatasets] = useState([]);
+  // Local state for UI-only elements
   const [isCreatingDataset, setIsCreatingDataset] = useState(false);
 
   // Labeling state
@@ -155,6 +161,15 @@ const DatasetCreation = ({ onNotification }) => {
   // Load datasets on component mount
   useEffect(() => {
     loadDatasets();
+    
+    // If we have an active stream from previous session, make sure it's displayed
+    if (streamActive && streamUrl) {
+      console.log('Restoring active stream from previous session');
+      // Re-fetch video info to ensure stream is still active
+      setTimeout(() => {
+        fetchVideoInfo();
+      }, 500);
+    }
   }, []);
 
   const loadDatasets = async () => {
@@ -629,22 +644,59 @@ const DatasetCreation = ({ onNotification }) => {
       {/* Header */}
       <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Box>
-          <Typography variant="h4" fontWeight="bold" gutterBottom>
-            Dataset Creation
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Typography variant="h4" fontWeight="bold">
+              Dataset Creation
+            </Typography>
+            {(isInitialized || capturedImages.length > 0) && (
+              <Chip 
+                label="Session Active" 
+                size="small" 
+                color="success" 
+                variant="outlined"
+                icon={<SaveIcon sx={{ fontSize: 16 }} />}
+                sx={{ 
+                  animation: 'pulse 2s infinite',
+                  '& .MuiChip-label': { fontSize: '0.75rem' }
+                }}
+              />
+            )}
+          </Box>
           <Typography variant="body1" color="text.secondary">
             Create labeled datasets for TV/STB vision model training
           </Typography>
         </Box>
-        <Button
-          variant="outlined"
-          size="small"
-          startIcon={<ResetIcon />}
-          onClick={resetPanelSizes}
-          title="Reset panel sizes to default"
-        >
-          Reset Layout
-        </Button>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={<ResetIcon />}
+            onClick={resetPanelSizes}
+            title="Reset panel sizes to default"
+          >
+            Reset Layout
+          </Button>
+          {isInitialized && (
+            <Button
+              variant="outlined"
+              size="small"
+              color="error"
+              onClick={() => {
+                if (confirm('This will clear your current session including all captured images. Are you sure?')) {
+                  clearSession();
+                  onNotification({
+                    type: 'info',
+                    title: 'Session Cleared',
+                    message: 'Dataset creation session has been reset'
+                  });
+                }
+              }}
+              title="Clear current session"
+            >
+              New Session
+            </Button>
+          )}
+        </Box>
       </Box>
 
       <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '820px' }}>
