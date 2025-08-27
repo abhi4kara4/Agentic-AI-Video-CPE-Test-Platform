@@ -145,8 +145,8 @@ const DatasetCreation = ({ onNotification }) => {
     }
 
     try {
-      // Start video stream
-      const streamUrl = videoAPI.getStreamUrl(config.deviceId, config.outlet, config.resolution);
+      // Start video stream with cache-busting parameter
+      const streamUrl = videoAPI.getStreamUrl(config.deviceId, config.outlet, config.resolution) + `&t=${Date.now()}`;
       setStreamUrl(streamUrl);
       setStreamActive(true);
       
@@ -174,7 +174,7 @@ const DatasetCreation = ({ onNotification }) => {
     
     // Restart with new settings after a brief delay
     setTimeout(() => {
-      const newStreamUrl = videoAPI.getStreamUrl(config.deviceId, config.outlet, config.resolution);
+      const newStreamUrl = videoAPI.getStreamUrl(config.deviceId, config.outlet, config.resolution) + `&t=${Date.now()}`;
       setStreamUrl(newStreamUrl);
       setStreamActive(true);
       
@@ -287,8 +287,8 @@ const DatasetCreation = ({ onNotification }) => {
 
   const getVideoFrame = async () => {
     return new Promise((resolve) => {
-      const video = videoRef.current;
-      if (!video) {
+      const img = videoRef.current;
+      if (!img) {
         resolve('');
         return;
       }
@@ -296,10 +296,10 @@ const DatasetCreation = ({ onNotification }) => {
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
       
-      canvas.width = video.videoWidth || 704;
-      canvas.height = video.videoHeight || 480;
+      canvas.width = img.naturalWidth || 704;
+      canvas.height = img.naturalHeight || 480;
       
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       resolve(canvas.toDataURL('image/jpeg', 0.8).split(',')[1]);
     });
   };
@@ -455,9 +455,9 @@ const DatasetCreation = ({ onNotification }) => {
       </Box>
 
       <Grid container spacing={3} sx={{ height: 'calc(100% - 80px)' }}>
-        {/* Left Panel - Configuration & Controls */}
-        <Grid item xs={12} md={4} sx={{ height: '100%', overflow: 'auto' }}>
-          <Card>
+        {/* Top Row - Configuration and Video Stream */}
+        <Grid item xs={12} md={6} sx={{ height: '60%', overflow: 'auto' }}>
+          <Card sx={{ height: '100%' }}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
                 Platform Configuration
@@ -644,25 +644,10 @@ const DatasetCreation = ({ onNotification }) => {
             </CardContent>
           </Card>
 
-          {/* Progress Steps */}
-          <Card sx={{ mt: 2 }}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Progress
-              </Typography>
-              <Stepper activeStep={currentStep} orientation="vertical">
-                {steps.map((label, index) => (
-                  <Step key={label}>
-                    <StepLabel>{label}</StepLabel>
-                  </Step>
-                ))}
-              </Stepper>
-            </CardContent>
-          </Card>
         </Grid>
 
-        {/* Middle Panel - Video Stream */}
-        <Grid item xs={12} md={4} sx={{ height: '100%' }}>
+        {/* Top Row - Video Stream */}
+        <Grid item xs={12} md={6} sx={{ height: '60%' }}>
           <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
             <CardContent sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -692,15 +677,20 @@ const DatasetCreation = ({ onNotification }) => {
                 }}
               >
                 {streamActive ? (
-                  <video
+                  <img
                     ref={videoRef}
                     src={streamUrl}
-                    autoPlay
-                    muted
+                    alt="Video Stream"
                     style={{
                       width: '100%',
                       height: '100%',
                       objectFit: 'contain',
+                    }}
+                    onError={(e) => {
+                      console.error('Video stream error:', e);
+                    }}
+                    onLoad={() => {
+                      console.log('Video stream loaded successfully');
                     }}
                   />
                 ) : (
@@ -725,8 +715,8 @@ const DatasetCreation = ({ onNotification }) => {
           </Card>
         </Grid>
 
-        {/* Right Panel - Dataset Management */}
-        <Grid item xs={12} md={4} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+        {/* Bottom Row - Dataset Management */}
+        <Grid item xs={12} md={6} sx={{ height: '40%', display: 'flex', flexDirection: 'column' }}>
           {/* Dataset Selection */}
           <Card sx={{ mb: 2 }}>
             <CardContent>
@@ -781,8 +771,27 @@ const DatasetCreation = ({ onNotification }) => {
             </CardContent>
           </Card>
 
-          {/* Captured Images - Scrollable */}
-          <Card sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {/* Progress Steps */}
+          <Card sx={{ mt: 2 }}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                Progress
+              </Typography>
+              <Stepper activeStep={currentStep} orientation="vertical">
+                {steps.map((label, index) => (
+                  <Step key={label}>
+                    <StepLabel>{label}</StepLabel>
+                  </Step>
+                ))}
+              </Stepper>
+            </CardContent>
+          </Card>
+
+        </Grid>
+
+        {/* Bottom Row - Captured Images */}
+        <Grid item xs={12} md={6} sx={{ height: '40%' }}>
+          <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <CardContent sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
               <Typography variant="h6" gutterBottom>
                 Captured Images ({capturedImages.length})
