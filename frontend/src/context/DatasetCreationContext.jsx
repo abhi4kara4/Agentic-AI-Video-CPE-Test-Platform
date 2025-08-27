@@ -60,25 +60,81 @@ export const DatasetCreationProvider = ({ children }) => {
 
   // Save state to session storage whenever it changes
   useEffect(() => {
-    const stateToSave = {
-      config,
-      isInitialized,
-      deviceLocked,
-      streamActive,
-      currentStep,
-      streamUrl,
-      capturedImages: capturedImages.map(img => ({
-        ...img,
-        // Don't save the full thumbnail URL, just the base64 part
-        base64: img.thumbnail?.includes('base64,') ? img.thumbnail.split('base64,')[1] : img.base64
-      })),
-      videoInfo,
-      currentDataset,
-      datasets,
-      savedAt: new Date().toISOString()
-    };
+    try {
+      const stateToSave = {
+        config,
+        isInitialized,
+        deviceLocked,
+        streamActive,
+        currentStep,
+        streamUrl,
+        // Only save metadata for images, not the actual base64 data
+        capturedImages: capturedImages.map(img => ({
+          id: img.id,
+          timestamp: img.timestamp,
+          path: img.path,
+          labels: img.labels,
+          datasetType: img.datasetType,
+          // Don't save thumbnail - it will be regenerated from backend
+        })),
+        videoInfo,
+        currentDataset,
+        datasets,
+        savedAt: new Date().toISOString()
+      };
 
-    sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(stateToSave));
+      const serialized = JSON.stringify(stateToSave);
+      
+      // Check if the data is too large (sessionStorage limit is ~5MB)
+      if (serialized.length > 4 * 1024 * 1024) { // 4MB limit to be safe
+        // If too large, only save essential state without captured images
+        const essentialState = {
+          config,
+          isInitialized,
+          deviceLocked,
+          streamActive,
+          currentStep,
+          streamUrl,
+          capturedImages: [], // Don't save images if quota exceeded
+          videoInfo,
+          currentDataset,
+          datasets,
+          savedAt: new Date().toISOString(),
+          warningMessage: 'Captured images not persisted due to storage quota'
+        };
+        sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(essentialState));
+        console.warn('SessionStorage quota nearly exceeded. Saved essential state only.');
+      } else {
+        sessionStorage.setItem(SESSION_STORAGE_KEY, serialized);
+      }
+    } catch (error) {
+      if (error.name === 'QuotaExceededError') {
+        console.warn('SessionStorage quota exceeded. Clearing old data and saving essential state only.');
+        try {
+          // Clear old data and save only essential state
+          const essentialState = {
+            config,
+            isInitialized,
+            deviceLocked,
+            streamActive,
+            currentStep,
+            streamUrl,
+            capturedImages: [], // Don't save images
+            videoInfo,
+            currentDataset,
+            datasets,
+            savedAt: new Date().toISOString(),
+            warningMessage: 'Captured images not persisted due to storage quota'
+          };
+          sessionStorage.clear();
+          sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(essentialState));
+        } catch (e) {
+          console.error('Failed to save even essential state:', e);
+        }
+      } else {
+        console.error('Failed to save session state:', error);
+      }
+    }
   }, [
     config,
     isInitialized,

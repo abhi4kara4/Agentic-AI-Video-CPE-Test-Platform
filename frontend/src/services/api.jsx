@@ -97,11 +97,12 @@ export const datasetAPI = {
     apiClient.get(`/dataset/${datasetId}/images/${imageId}`),
   
   // Dataset operations
-  labelImage: (datasetName, imageName, screenType, notes) =>
+  labelImage: (datasetName, imageName, screenType, notes, labelData = null) =>
     apiClient.post(`/dataset/${datasetName}/label`, { 
       image_name: imageName,
       screen_type: screenType,
-      notes 
+      notes,
+      label_data: labelData // Extended data for different model types
     }),
   exportDataset: (datasetId, format = 'llava') => 
     apiClient.post(`/dataset/${datasetId}/export`, { format }),

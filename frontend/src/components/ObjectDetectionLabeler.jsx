@@ -32,10 +32,14 @@ const ObjectDetectionLabeler = ({ image, labels, onLabelsChange }) => {
   const [boundingBoxes, setBoundingBoxes] = useState(labels?.boundingBoxes || []);
   const [zoom, setZoom] = useState(1);
   const [canvasSize, setCanvasSize] = useState({ width: 600, height: 400 });
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const [imageParams, setImageParams] = useState({ offsetX: 0, offsetY: 0, drawWidth: 0, drawHeight: 0 });
 
   useEffect(() => {
-    drawCanvas();
-  }, [boundingBoxes, zoom, image]);
+    if (imageLoaded) {
+      drawCanvas();
+    }
+  }, [boundingBoxes, zoom, imageLoaded]);
 
   useEffect(() => {
     onLabelsChange({
@@ -44,17 +48,13 @@ const ObjectDetectionLabeler = ({ image, labels, onLabelsChange }) => {
     });
   }, [boundingBoxes]);
 
-  const drawCanvas = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    // Draw image
+  useEffect(() => {
     if (image) {
       const img = new Image();
       img.onload = () => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+
         // Calculate aspect ratio and fit image to canvas
         const aspectRatio = img.width / img.height;
         let drawWidth, drawHeight;
@@ -70,6 +70,26 @@ const ObjectDetectionLabeler = ({ image, labels, onLabelsChange }) => {
         const offsetX = (canvas.width - drawWidth) / 2;
         const offsetY = (canvas.height - drawHeight) / 2;
 
+        setImageParams({ offsetX, offsetY, drawWidth, drawHeight });
+        setImageLoaded(true);
+      };
+      img.src = image;
+    }
+  }, [image, zoom]);
+
+  const drawCanvas = () => {
+    const canvas = canvasRef.current;
+    if (!canvas || !imageLoaded) return;
+
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Draw image
+    if (image) {
+      const img = new Image();
+      img.onload = () => {
+        const { offsetX, offsetY, drawWidth, drawHeight } = imageParams;
+        
         ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
 
         // Draw existing bounding boxes
@@ -84,14 +104,19 @@ const ObjectDetectionLabeler = ({ image, labels, onLabelsChange }) => {
             box.height * drawHeight
           );
 
-          // Draw label
-          ctx.fillStyle = cls?.color || '#FF0000';
+          // Draw label background
+          const labelText = cls?.name || box.class;
           ctx.font = '12px Arial';
-          ctx.fillText(
-            cls?.name || box.class,
-            offsetX + (box.x * drawWidth),
-            offsetY + (box.y * drawHeight) - 5
-          );
+          const textMetrics = ctx.measureText(labelText);
+          const labelX = offsetX + (box.x * drawWidth);
+          const labelY = offsetY + (box.y * drawHeight) - 5;
+          
+          ctx.fillStyle = cls?.color || '#FF0000';
+          ctx.fillRect(labelX, labelY - 12, textMetrics.width + 4, 14);
+          
+          // Draw label text
+          ctx.fillStyle = 'white';
+          ctx.fillText(labelText, labelX + 2, labelY);
         });
 
         // Draw current drawing box
@@ -148,19 +173,29 @@ const ObjectDetectionLabeler = ({ image, labels, onLabelsChange }) => {
   const handleMouseUp = (event) => {
     if (!isDrawing || !currentBox) return;
 
-    // Convert canvas coordinates to normalized coordinates (0-1)
-    const canvas = canvasRef.current;
-    const normalizedBox = {
-      id: Date.now(),
-      class: selectedClass,
-      x: currentBox.x / canvas.width,
-      y: currentBox.y / canvas.height,
-      width: currentBox.width / canvas.width,
-      height: currentBox.height / canvas.height
+    // Convert canvas coordinates to normalized coordinates relative to the actual image
+    const { offsetX, offsetY, drawWidth, drawHeight } = imageParams;
+    
+    // Calculate the bounding box relative to the image (not the canvas)
+    const imageRelativeBox = {
+      x: Math.max(0, (currentBox.x - offsetX) / drawWidth),
+      y: Math.max(0, (currentBox.y - offsetY) / drawHeight),
+      width: Math.min(1, currentBox.width / drawWidth),
+      height: Math.min(1, currentBox.height / drawHeight)
     };
 
-    // Only add if box has reasonable size
-    if (normalizedBox.width > 0.01 && normalizedBox.height > 0.01) {
+    // Ensure the box is within image bounds and has reasonable size
+    if (imageRelativeBox.width > 0.02 && imageRelativeBox.height > 0.02 &&
+        imageRelativeBox.x >= 0 && imageRelativeBox.y >= 0 &&
+        imageRelativeBox.x + imageRelativeBox.width <= 1 &&
+        imageRelativeBox.y + imageRelativeBox.height <= 1) {
+      
+      const normalizedBox = {
+        id: Date.now(),
+        class: selectedClass,
+        ...imageRelativeBox
+      };
+      
       setBoundingBoxes(prev => [...prev, normalizedBox]);
     }
 

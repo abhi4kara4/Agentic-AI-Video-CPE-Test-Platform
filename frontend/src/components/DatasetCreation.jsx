@@ -175,6 +175,16 @@ const DatasetCreation = ({ onNotification }) => {
         fetchVideoInfo();
       }, 500);
     }
+    
+    // Check if there was a storage quota warning
+    const savedState = JSON.parse(sessionStorage.getItem('datasetCreationSession') || '{}');
+    if (savedState.warningMessage) {
+      onNotification({
+        type: 'warning',
+        title: 'Storage Quota Exceeded',
+        message: 'Your captured images may not persist between page refreshes due to browser storage limits. Consider exporting your dataset regularly.'
+      });
+    }
   }, []);
 
   const loadDatasets = async () => {
@@ -344,9 +354,38 @@ const DatasetCreation = ({ onNotification }) => {
       message: `Configured for ${DATASET_TYPE_INFO[typeConfig.datasetType].name} training`
     });
     
-    // Now proceed with initialization
+    // Now proceed with initialization directly (don't call handleInitializePlatform again)
+    const initializeWithDatasetType = async () => {
+      try {
+        // Start video stream with cache-busting parameter
+        const streamUrl = videoAPI.getStreamUrl(config.deviceId, config.outlet, config.resolution) + `&t=${Date.now()}`;
+        setStreamUrl(streamUrl);
+        setStreamActive(true);
+        
+        setIsInitialized(true);
+        setCurrentStep(1);
+        
+        // Fetch video info to confirm resolution
+        setTimeout(() => {
+          fetchVideoInfo();
+        }, 1000);
+        
+        onNotification({
+          type: 'success',
+          title: 'Platform Initialized',
+          message: 'Video stream started successfully'
+        });
+      } catch (error) {
+        onNotification({
+          type: 'error',
+          title: 'Initialization Failed',
+          message: error.message
+        });
+      }
+    };
+    
     setTimeout(() => {
-      handleInitializePlatform();
+      initializeWithDatasetType();
     }, 500);
   };
 
@@ -548,18 +587,42 @@ const DatasetCreation = ({ onNotification }) => {
 
   const openLabelingDialog = (image) => {
     setSelectedImage(image);
-    setCurrentLabels(image.labels || {
-      screen_type: '',
-      app_name: '',
-      ui_elements: [],
-      visible_text: '',
-      anomalies: [],
-      navigation: {
-        focused_element: '',
-        can_navigate: { up: false, down: false, left: false, right: false }
-      },
-      notes: ''
-    });
+    
+    // Initialize labels based on dataset type
+    let defaultLabels = {};
+    
+    switch (config.datasetType) {
+      case DATASET_TYPES.OBJECT_DETECTION:
+        defaultLabels = {
+          boundingBoxes: [],
+          notes: ''
+        };
+        break;
+      case DATASET_TYPES.IMAGE_CLASSIFICATION:
+        defaultLabels = {
+          className: '',
+          confidence: 100,
+          notes: ''
+        };
+        break;
+      case DATASET_TYPES.VISION_LLM:
+      default:
+        defaultLabels = {
+          screen_type: '',
+          app_name: '',
+          ui_elements: [],
+          visible_text: '',
+          anomalies: [],
+          navigation: {
+            focused_element: '',
+            can_navigate: { up: false, down: false, left: false, right: false }
+          },
+          notes: ''
+        };
+        break;
+    }
+    
+    setCurrentLabels(image.labels || defaultLabels);
     setLabelingDialogOpen(true);
   };
 
@@ -607,7 +670,8 @@ const DatasetCreation = ({ onNotification }) => {
         currentDataset.name,
         selectedImage.path.split('/').pop(),
         config.datasetType === DATASET_TYPES.IMAGE_CLASSIFICATION ? currentLabels.className : currentLabels.screen_type,
-        JSON.stringify(labelData)
+        currentLabels.notes || '',
+        labelData
       );
       
       // Update local state
