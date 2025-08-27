@@ -485,9 +485,9 @@ const DatasetCreation = ({ onNotification }) => {
         </Typography>
       </Box>
 
-      <Grid container spacing={3} sx={{ minHeight: '720px' }}>
+      <Grid container spacing={3} sx={{ minHeight: '820px' }}>
         {/* Top Row - Configuration and Video Stream */}
-        <Grid item xs={12} md={4} sx={{ height: '400px' }}>
+        <Grid item xs={12} md={4} sx={{ height: '500px' }}>
           <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
             <CardContent sx={{ flexGrow: 1, overflow: 'auto' }}>
               <Typography variant="h6" gutterBottom>
@@ -678,7 +678,7 @@ const DatasetCreation = ({ onNotification }) => {
         </Grid>
 
         {/* Top Row - Video Stream */}
-        <Grid item xs={12} md={8} sx={{ height: '400px' }}>
+        <Grid item xs={12} md={8} sx={{ height: '500px' }}>
           <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
             <CardContent sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
