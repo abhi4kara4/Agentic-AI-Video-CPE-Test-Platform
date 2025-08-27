@@ -443,7 +443,7 @@ const DatasetCreation = ({ onNotification }) => {
   ];
 
   return (
-    <Box sx={{ p: 3, maxWidth: '100%', height: 'calc(100vh - 150px)', overflow: 'hidden' }}>
+    <Box sx={{ p: 3, maxWidth: '100%', height: 'calc(100vh - 150px)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
       {/* Header */}
       <Box sx={{ mb: 3 }}>
         <Typography variant="h4" fontWeight="bold" gutterBottom>
@@ -454,11 +454,11 @@ const DatasetCreation = ({ onNotification }) => {
         </Typography>
       </Box>
 
-      <Grid container spacing={3} sx={{ height: 'calc(100% - 80px)' }}>
+      <Grid container spacing={3} sx={{ flexGrow: 1, minHeight: 0 }}>
         {/* Top Row - Configuration and Video Stream */}
-        <Grid item xs={12} md={6} sx={{ height: '60%', overflow: 'auto' }}>
-          <Card sx={{ height: '100%' }}>
-            <CardContent>
+        <Grid item xs={12} md={4} sx={{ height: '60%' }}>
+          <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+            <CardContent sx={{ flexGrow: 1, overflow: 'auto' }}>
               <Typography variant="h6" gutterBottom>
                 Platform Configuration
               </Typography>
@@ -647,7 +647,7 @@ const DatasetCreation = ({ onNotification }) => {
         </Grid>
 
         {/* Top Row - Video Stream */}
-        <Grid item xs={12} md={6} sx={{ height: '60%' }}>
+        <Grid item xs={12} md={8} sx={{ height: '60%' }}>
           <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
             <CardContent sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -716,11 +716,12 @@ const DatasetCreation = ({ onNotification }) => {
         </Grid>
 
         {/* Bottom Row - Dataset Management */}
-        <Grid item xs={12} md={6} sx={{ height: '40%', display: 'flex', flexDirection: 'column' }}>
-          {/* Dataset Selection */}
-          <Card sx={{ mb: 2 }}>
-            <CardContent>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        <Grid item xs={12} md={6} sx={{ height: '40%' }}>
+          <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {/* Dataset Selection */}
+            <Card sx={{ minHeight: '120px' }}>
+              <CardContent>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                 <Typography variant="h6">
                   Dataset Management
                 </Typography>
@@ -771,28 +772,28 @@ const DatasetCreation = ({ onNotification }) => {
             </CardContent>
           </Card>
 
-          {/* Progress Steps */}
-          <Card sx={{ mt: 2 }}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Progress
-              </Typography>
-              <Stepper activeStep={currentStep} orientation="vertical">
-                {steps.map((label, index) => (
-                  <Step key={label}>
-                    <StepLabel>{label}</StepLabel>
-                  </Step>
-                ))}
-              </Stepper>
-            </CardContent>
-          </Card>
-
+            {/* Progress Steps */}
+            <Card sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
+              <CardContent sx={{ flexGrow: 1, overflow: 'auto' }}>
+                <Typography variant="h6" gutterBottom>
+                  Progress
+                </Typography>
+                <Stepper activeStep={currentStep} orientation="vertical">
+                  {steps.map((label, index) => (
+                    <Step key={label}>
+                      <StepLabel>{label}</StepLabel>
+                    </Step>
+                  ))}
+                </Stepper>
+              </CardContent>
+            </Card>
+          </Box>
         </Grid>
 
         {/* Bottom Row - Captured Images */}
         <Grid item xs={12} md={6} sx={{ height: '40%' }}>
-          <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <CardContent sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+            <CardContent sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
               <Typography variant="h6" gutterBottom>
                 Captured Images ({capturedImages.length})
               </Typography>
@@ -800,12 +801,13 @@ const DatasetCreation = ({ onNotification }) => {
               {capturedImages.length === 0 ? (
                 <Box
                   sx={{
-                    height: 200,
+                    flexGrow: 1,
                     bgcolor: 'grey.50',
                     borderRadius: 1,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
+                    minHeight: 150,
                   }}
                 >
                   <Typography color="text.secondary">
