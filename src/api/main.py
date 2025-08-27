@@ -675,52 +675,52 @@ async def label_image(dataset_name: str, request: LabelImageRequest):
             "labeled_at": datetime.now().isoformat(),
             "notes": request.notes or ""
         }
-    
-    if request.label_data:
-        dataset_type = request.label_data.get('datasetType')
-        labels = request.label_data.get('labels', {})
         
-        if dataset_type == 'object_detection':
-            # Object detection format
-            annotation.update({
-                "dataset_type": "object_detection",
-                "bounding_boxes": labels.get('boundingBoxes', []),
-                "augmentation_options": request.label_data.get('augmentationOptions', {})
-            })
-        elif dataset_type == 'image_classification':
-            # Image classification format
-            annotation.update({
-                "dataset_type": "image_classification", 
-                "class_name": labels.get('className'),
-                "confidence": labels.get('confidence', 100),
-                "augmentation_options": request.label_data.get('augmentationOptions', {})
-            })
-        elif dataset_type == 'vision_llm':
-            # Vision LLM format
+        if request.label_data:
+            dataset_type = request.label_data.get('datasetType')
+            labels = request.label_data.get('labels', {})
+            
+            if dataset_type == 'object_detection':
+                # Object detection format
+                annotation.update({
+                    "dataset_type": "object_detection",
+                    "bounding_boxes": labels.get('boundingBoxes', []),
+                    "augmentation_options": request.label_data.get('augmentationOptions', {})
+                })
+            elif dataset_type == 'image_classification':
+                # Image classification format
+                annotation.update({
+                    "dataset_type": "image_classification", 
+                    "class_name": labels.get('className'),
+                    "confidence": labels.get('confidence', 100),
+                    "augmentation_options": request.label_data.get('augmentationOptions', {})
+                })
+            elif dataset_type == 'vision_llm':
+                # Vision LLM format
+                if request.screen_type not in SCREEN_STATES:
+                    raise HTTPException(status_code=400, detail=f"Invalid state. Must be one of: {list(SCREEN_STATES.keys())}")
+                
+                annotation.update({
+                    "dataset_type": "vision_llm",
+                    "state": request.screen_type,
+                    "state_description": SCREEN_STATES.get(request.screen_type),
+                    "app_name": labels.get('app_name'),
+                    "ui_elements": labels.get('ui_elements', []),
+                    "visible_text": labels.get('visible_text', ''),
+                    "anomalies": labels.get('anomalies', []),
+                    "navigation": labels.get('navigation', {}),
+                    "augmentation_options": request.label_data.get('augmentationOptions', {})
+                })
+        else:
+            # Legacy format for backward compatibility
             if request.screen_type not in SCREEN_STATES:
                 raise HTTPException(status_code=400, detail=f"Invalid state. Must be one of: {list(SCREEN_STATES.keys())}")
             
             annotation.update({
                 "dataset_type": "vision_llm",
                 "state": request.screen_type,
-                "state_description": SCREEN_STATES.get(request.screen_type),
-                "app_name": labels.get('app_name'),
-                "ui_elements": labels.get('ui_elements', []),
-                "visible_text": labels.get('visible_text', ''),
-                "anomalies": labels.get('anomalies', []),
-                "navigation": labels.get('navigation', {}),
-                "augmentation_options": request.label_data.get('augmentationOptions', {})
+                "state_description": SCREEN_STATES.get(request.screen_type)
             })
-    else:
-        # Legacy format for backward compatibility
-        if request.screen_type not in SCREEN_STATES:
-            raise HTTPException(status_code=400, detail=f"Invalid state. Must be one of: {list(SCREEN_STATES.keys())}")
-        
-        annotation.update({
-            "dataset_type": "vision_llm",
-            "state": request.screen_type,
-            "state_description": SCREEN_STATES.get(request.screen_type)
-        })
     
     # Save annotation
     annotation_file = dataset_dir / "annotations" / f"{Path(request.image_name).stem}.json"
