@@ -25,6 +25,7 @@ import { OBJECT_DETECTION_CLASSES } from '../constants/datasetTypes.js';
 
 const ObjectDetectionLabeler = ({ image, labels, onLabelsChange }) => {
   const canvasRef = useRef(null);
+  const imageRef = useRef(null); // Cache the loaded image
   const [isDrawing, setIsDrawing] = useState(false);
   const [startPos, setStartPos] = useState(null);
   const [currentBox, setCurrentBox] = useState(null);
@@ -55,6 +56,9 @@ const ObjectDetectionLabeler = ({ image, labels, onLabelsChange }) => {
         const canvas = canvasRef.current;
         if (!canvas) return;
 
+        // Cache the loaded image
+        imageRef.current = img;
+
         // Calculate aspect ratio and fit image to canvas
         const aspectRatio = img.width / img.height;
         let drawWidth, drawHeight;
@@ -79,62 +83,56 @@ const ObjectDetectionLabeler = ({ image, labels, onLabelsChange }) => {
 
   const drawCanvas = () => {
     const canvas = canvasRef.current;
-    if (!canvas || !imageLoaded) return;
+    if (!canvas || !imageLoaded || !imageRef.current) return;
 
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Draw image
-    if (image) {
-      const img = new Image();
-      img.onload = () => {
-        const { offsetX, offsetY, drawWidth, drawHeight } = imageParams;
-        
-        ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
+    // Draw cached image to prevent flickering
+    const { offsetX, offsetY, drawWidth, drawHeight } = imageParams;
+    
+    ctx.drawImage(imageRef.current, offsetX, offsetY, drawWidth, drawHeight);
 
-        // Draw existing bounding boxes
-        boundingBoxes.forEach((box, index) => {
-          const cls = OBJECT_DETECTION_CLASSES[box.class];
-          ctx.strokeStyle = cls?.color || '#FF0000';
-          ctx.lineWidth = 2;
-          ctx.strokeRect(
-            offsetX + (box.x * drawWidth),
-            offsetY + (box.y * drawHeight),
-            box.width * drawWidth,
-            box.height * drawHeight
-          );
+    // Draw existing bounding boxes
+    boundingBoxes.forEach((box, index) => {
+      const cls = OBJECT_DETECTION_CLASSES[box.class];
+      ctx.strokeStyle = cls?.color || '#FF0000';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(
+        offsetX + (box.x * drawWidth),
+        offsetY + (box.y * drawHeight),
+        box.width * drawWidth,
+        box.height * drawHeight
+      );
 
-          // Draw label background
-          const labelText = cls?.name || box.class;
-          ctx.font = '12px Arial';
-          const textMetrics = ctx.measureText(labelText);
-          const labelX = offsetX + (box.x * drawWidth);
-          const labelY = offsetY + (box.y * drawHeight) - 5;
-          
-          ctx.fillStyle = cls?.color || '#FF0000';
-          ctx.fillRect(labelX, labelY - 12, textMetrics.width + 4, 14);
-          
-          // Draw label text
-          ctx.fillStyle = 'white';
-          ctx.fillText(labelText, labelX + 2, labelY);
-        });
+      // Draw label background
+      const labelText = cls?.name || box.class;
+      ctx.font = '12px Arial';
+      const textMetrics = ctx.measureText(labelText);
+      const labelX = offsetX + (box.x * drawWidth);
+      const labelY = offsetY + (box.y * drawHeight) - 5;
+      
+      ctx.fillStyle = cls?.color || '#FF0000';
+      ctx.fillRect(labelX, labelY - 12, textMetrics.width + 4, 14);
+      
+      // Draw label text
+      ctx.fillStyle = 'white';
+      ctx.fillText(labelText, labelX + 2, labelY);
+    });
 
-        // Draw current drawing box
-        if (currentBox) {
-          const cls = OBJECT_DETECTION_CLASSES[selectedClass];
-          ctx.strokeStyle = cls?.color || '#FF0000';
-          ctx.lineWidth = 2;
-          ctx.setLineDash([5, 5]);
-          ctx.strokeRect(
-            currentBox.x,
-            currentBox.y,
-            currentBox.width,
-            currentBox.height
-          );
-          ctx.setLineDash([]);
-        }
-      };
-      img.src = image;
+    // Draw current drawing box
+    if (currentBox) {
+      const cls = OBJECT_DETECTION_CLASSES[selectedClass];
+      ctx.strokeStyle = cls?.color || '#FF0000';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 5]);
+      ctx.strokeRect(
+        currentBox.x,
+        currentBox.y,
+        currentBox.width,
+        currentBox.height
+      );
+      ctx.setLineDash([]);
     }
   };
 
@@ -160,14 +158,19 @@ const ObjectDetectionLabeler = ({ image, labels, onLabelsChange }) => {
     const width = pos.x - startPos.x;
     const height = pos.y - startPos.y;
 
-    setCurrentBox({
+    const newBox = {
       x: width > 0 ? startPos.x : pos.x,
       y: height > 0 ? startPos.y : pos.y,
       width: Math.abs(width),
       height: Math.abs(height)
-    });
+    };
 
-    drawCanvas();
+    setCurrentBox(newBox);
+    
+    // Use requestAnimationFrame to prevent flickering
+    requestAnimationFrame(() => {
+      drawCanvas();
+    });
   };
 
   const handleMouseUp = (event) => {

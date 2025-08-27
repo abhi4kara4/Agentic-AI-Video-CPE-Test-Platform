@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from contextlib import asynccontextmanager
 import asyncio
 import io
@@ -491,6 +492,13 @@ SCREEN_STATES = {
     "other": "Other screen type"
 }
 
+# Pydantic models for API requests
+class LabelImageRequest(BaseModel):
+    image_name: str
+    screen_type: str
+    notes: Optional[str] = ""
+    label_data: Optional[Dict[str, Any]] = None
+
 
 @app.get("/dataset/list")
 async def list_datasets():
@@ -597,24 +605,69 @@ async def capture_to_dataset(dataset_name: str):
 
 
 @app.post("/dataset/{dataset_name}/label")
-async def label_image(dataset_name: str, image_filename: str, state: str, description: str = ""):
-    """Label an image in the dataset"""
+async def label_image(dataset_name: str, request: LabelImageRequest):
+    """Label an image in the dataset with extended support for different model types"""
     dataset_dir = DATASETS_DIR / dataset_name
     if not dataset_dir.exists():
         raise HTTPException(status_code=404, detail="Dataset not found")
     
-    if state not in SCREEN_STATES:
-        raise HTTPException(status_code=400, detail=f"Invalid state. Must be one of: {list(SCREEN_STATES.keys())}")
-    
+    # Create annotation based on label data type
     annotation = {
-        "image_filename": image_filename,
-        "state": state,
-        "state_description": SCREEN_STATES[state],
-        "custom_description": description,
-        "labeled_at": datetime.now().isoformat()
+        "image_filename": request.image_name,
+        "labeled_at": datetime.now().isoformat(),
+        "notes": request.notes
     }
     
-    annotation_file = dataset_dir / "annotations" / f"{Path(image_filename).stem}.json"
+    if request.label_data:
+        dataset_type = request.label_data.get('datasetType')
+        labels = request.label_data.get('labels', {})
+        
+        if dataset_type == 'object_detection':
+            # Object detection format
+            annotation.update({
+                "dataset_type": "object_detection",
+                "bounding_boxes": labels.get('boundingBoxes', []),
+                "augmentation_options": request.label_data.get('augmentationOptions', {})
+            })
+        elif dataset_type == 'image_classification':
+            # Image classification format
+            annotation.update({
+                "dataset_type": "image_classification", 
+                "class_name": labels.get('className'),
+                "confidence": labels.get('confidence', 100),
+                "augmentation_options": request.label_data.get('augmentationOptions', {})
+            })
+        elif dataset_type == 'vision_llm':
+            # Vision LLM format
+            if request.screen_type not in SCREEN_STATES:
+                raise HTTPException(status_code=400, detail=f"Invalid state. Must be one of: {list(SCREEN_STATES.keys())}")
+            
+            annotation.update({
+                "dataset_type": "vision_llm",
+                "state": request.screen_type,
+                "state_description": SCREEN_STATES.get(request.screen_type),
+                "app_name": labels.get('app_name'),
+                "ui_elements": labels.get('ui_elements', []),
+                "visible_text": labels.get('visible_text', ''),
+                "anomalies": labels.get('anomalies', []),
+                "navigation": labels.get('navigation', {}),
+                "augmentation_options": request.label_data.get('augmentationOptions', {})
+            })
+    else:
+        # Legacy format for backward compatibility
+        if request.screen_type not in SCREEN_STATES:
+            raise HTTPException(status_code=400, detail=f"Invalid state. Must be one of: {list(SCREEN_STATES.keys())}")
+        
+        annotation.update({
+            "dataset_type": "vision_llm",
+            "state": request.screen_type,
+            "state_description": SCREEN_STATES.get(request.screen_type)
+        })
+    
+    # Save annotation
+    annotation_file = dataset_dir / "annotations" / f"{Path(request.image_name).stem}.json"
+    annotation_file.parent.mkdir(exist_ok=True)
+    
     with open(annotation_file, "w") as f:
         json.dump(annotation, f, indent=2)
     

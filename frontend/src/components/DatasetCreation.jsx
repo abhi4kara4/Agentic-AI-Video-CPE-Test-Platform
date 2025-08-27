@@ -35,6 +35,7 @@ import {
   LockOpen as UnlockIcon,
   Save as SaveIcon,
   Label as LabelIcon,
+  Edit as EditIcon,
   Delete as DeleteIcon,
   Visibility as ViewIcon,
   KeyboardArrowUp,
@@ -632,7 +633,14 @@ const DatasetCreation = ({ onNotification }) => {
   };
 
   const saveLabeledImage = async () => {
-    if (!currentDataset || !selectedImage) return;
+    if (!currentDataset || !selectedImage) {
+      onNotification({
+        type: 'error',
+        title: 'Save Error',
+        message: 'Missing dataset or selected image'
+      });
+      return;
+    }
     
     // Validate labels based on dataset type
     const isValidLabels = () => {
@@ -666,7 +674,7 @@ const DatasetCreation = ({ onNotification }) => {
       };
       
       // Save to backend with enhanced data
-      await datasetAPI.labelImage(
+      const response = await datasetAPI.labelImage(
         currentDataset.name,
         selectedImage.path.split('/').pop(),
         config.datasetType === DATASET_TYPES.IMAGE_CLASSIFICATION ? currentLabels.className : currentLabels.screen_type,
@@ -683,7 +691,21 @@ const DatasetCreation = ({ onNotification }) => {
       setCapturedImages(updatedImages);
       setCurrentStep(Math.max(currentStep, 4));
       
+      // Close the dialog after successful save
       setLabelingDialogOpen(false);
+      setSelectedImage(null);
+      setCurrentLabels({
+        screen_type: '',
+        app_name: '',
+        ui_elements: [],
+        visible_text: '',
+        anomalies: [],
+        navigation: {
+          focused_element: '',
+          can_navigate: { up: false, down: false, left: false, right: false }
+        },
+        notes: ''
+      });
       
       const labelCount = config.datasetType === DATASET_TYPES.OBJECT_DETECTION 
         ? currentLabels.boundingBoxes?.length || 0
@@ -698,7 +720,7 @@ const DatasetCreation = ({ onNotification }) => {
       onNotification({
         type: 'error',
         title: 'Labeling Failed',
-        message: error.message
+        message: error.response?.data?.detail || error.message
       });
     }
   };
@@ -1344,10 +1366,14 @@ const DatasetCreation = ({ onNotification }) => {
                               <IconButton
                                 size="small"
                                 onClick={() => openLabelingDialog(image)}
-                                title="Label Image"
+                                title={image.labels ? "Edit Labels" : "Label Image"}
                                 sx={{ padding: '4px' }}
                               >
-                                <LabelIcon sx={{ fontSize: '16px' }} />
+                                {image.labels ? (
+                                  <EditIcon sx={{ fontSize: '16px' }} />
+                                ) : (
+                                  <LabelIcon sx={{ fontSize: '16px' }} />
+                                )}
                               </IconButton>
                               <IconButton 
                                 size="small"
