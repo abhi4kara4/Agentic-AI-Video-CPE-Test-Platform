@@ -51,6 +51,10 @@ import {
 } from '@mui/icons-material';
 import { videoAPI, deviceAPI, datasetAPI } from '../services/api.jsx';
 import { useDatasetCreation } from '../context/DatasetCreationContext.jsx';
+import DatasetTypeSelector from './DatasetTypeSelector.jsx';
+import ObjectDetectionLabeler from './ObjectDetectionLabeler.jsx';
+import ImageClassificationLabeler from './ImageClassificationLabeler.jsx';
+import { DATASET_TYPE_INFO, DATASET_TYPES } from '../constants/datasetTypes.js';
 
 // Screen state definitions
 const SCREEN_STATES = {
@@ -140,6 +144,7 @@ const DatasetCreation = ({ onNotification }) => {
 
   // Local state for UI-only elements
   const [isCreatingDataset, setIsCreatingDataset] = useState(false);
+  const [showDatasetTypeSelector, setShowDatasetTypeSelector] = useState(false);
 
   // Labeling state
   const [selectedImage, setSelectedImage] = useState(null);
@@ -286,6 +291,13 @@ const DatasetCreation = ({ onNotification }) => {
       return;
     }
 
+    // Check if dataset type is selected
+    if (!config.datasetType) {
+      setShowDatasetTypeSelector(true);
+      return;
+    }
+
+    const initializeWithDatasetType = async () => {
     try {
       // Start video stream with cache-busting parameter
       const streamUrl = videoAPI.getStreamUrl(config.deviceId, config.outlet, config.resolution) + `&t=${Date.now()}`;
@@ -312,6 +324,30 @@ const DatasetCreation = ({ onNotification }) => {
         message: error.message
       });
     }
+    };
+
+    // Proceed with initialization after dataset type is confirmed
+    initializeWithDatasetType();
+  };
+
+  const handleDatasetTypeSelection = (typeConfig) => {
+    setConfig(prev => ({
+      ...prev,
+      datasetType: typeConfig.datasetType,
+      augmentationOptions: typeConfig.augmentationOptions
+    }));
+    setShowDatasetTypeSelector(false);
+    
+    onNotification({
+      type: 'success',
+      title: 'Dataset Type Selected',
+      message: `Configured for ${DATASET_TYPE_INFO[typeConfig.datasetType].name} training`
+    });
+    
+    // Now proceed with initialization
+    setTimeout(() => {
+      handleInitializePlatform();
+    }, 500);
   };
 
   const handleRestreamVideo = () => {
@@ -535,29 +571,64 @@ const DatasetCreation = ({ onNotification }) => {
   const saveLabeledImage = async () => {
     if (!currentDataset || !selectedImage) return;
     
+    // Validate labels based on dataset type
+    const isValidLabels = () => {
+      switch (config.datasetType) {
+        case DATASET_TYPES.OBJECT_DETECTION:
+          return currentLabels.boundingBoxes && currentLabels.boundingBoxes.length > 0;
+        case DATASET_TYPES.IMAGE_CLASSIFICATION:
+          return currentLabels.className && currentLabels.className.length > 0;
+        case DATASET_TYPES.VISION_LLM:
+          return currentLabels.screen_type && currentLabels.screen_type.length > 0;
+        default:
+          return true;
+      }
+    };
+
+    if (!isValidLabels()) {
+      onNotification({
+        type: 'warning',
+        title: 'Incomplete Labels',
+        message: 'Please complete the required labeling fields'
+      });
+      return;
+    }
+    
     try {
-      // Save to backend
+      // Prepare labels in the format expected by the backend
+      const labelData = {
+        datasetType: config.datasetType,
+        labels: currentLabels,
+        augmentationOptions: config.augmentationOptions
+      };
+      
+      // Save to backend with enhanced data
       await datasetAPI.labelImage(
         currentDataset.name,
         selectedImage.path.split('/').pop(),
-        currentLabels.screen_type,
-        currentLabels.notes
+        config.datasetType === DATASET_TYPES.IMAGE_CLASSIFICATION ? currentLabels.className : currentLabels.screen_type,
+        JSON.stringify(labelData)
       );
       
       // Update local state
       const updatedImages = capturedImages.map(img => 
         img.id === selectedImage.id 
-          ? { ...img, labels: currentLabels }
+          ? { ...img, labels: currentLabels, datasetType: config.datasetType }
           : img
       );
       setCapturedImages(updatedImages);
       setCurrentStep(Math.max(currentStep, 4));
       
       setLabelingDialogOpen(false);
+      
+      const labelCount = config.datasetType === DATASET_TYPES.OBJECT_DETECTION 
+        ? currentLabels.boundingBoxes?.length || 0
+        : 1;
+      
       onNotification({
         type: 'success',
         title: 'Labels Saved',
-        message: 'Image labeled successfully'
+        message: `Image labeled successfully with ${labelCount} ${config.datasetType.replace('_', ' ')} label${labelCount !== 1 ? 's' : ''}`
       });
     } catch (error) {
       onNotification({
@@ -569,6 +640,15 @@ const DatasetCreation = ({ onNotification }) => {
   };
 
   const createDataset = async () => {
+    if (!config.datasetType) {
+      onNotification({
+        type: 'warning',
+        title: 'Dataset Type Required',
+        message: 'Please select a dataset type first by initializing the platform'
+      });
+      return;
+    }
+    
     setIsCreatingDataset(true);
     const datasetName = prompt('Enter dataset name:');
     
@@ -578,14 +658,22 @@ const DatasetCreation = ({ onNotification }) => {
     }
     
     try {
-      const response = await datasetAPI.createDataset(datasetName, 'TV/STB Screen Dataset');
+      const datasetTypeInfo = DATASET_TYPE_INFO[config.datasetType];
+      const description = `${datasetTypeInfo.name} dataset for ${datasetTypeInfo.description.toLowerCase()}`;
+      
+      const response = await datasetAPI.createDataset(datasetName, description, {
+        datasetType: config.datasetType,
+        augmentationOptions: config.augmentationOptions,
+        supportedFormats: datasetTypeInfo.supportedFormats
+      });
+      
       setCurrentDataset(response.data);
       await loadDatasets();
       
       onNotification({
         type: 'success',
         title: 'Dataset Created',
-        message: `Dataset "${datasetName}" created successfully`
+        message: `${datasetTypeInfo.icon} ${datasetTypeInfo.name} dataset "${datasetName}" created successfully`
       });
     } catch (error) {
       onNotification({
@@ -709,6 +797,22 @@ const DatasetCreation = ({ onNotification }) => {
                 Platform Configuration
               </Typography>
 
+              {/* Dataset Type Display */}
+              {config.datasetType && (
+                <Alert 
+                  severity="info" 
+                  sx={{ mb: 2 }}
+                  icon={<Chip label={DATASET_TYPE_INFO[config.datasetType].icon} size="small" />}
+                >
+                  <Typography variant="body2">
+                    <strong>Dataset Type:</strong> {DATASET_TYPE_INFO[config.datasetType].name}
+                  </Typography>
+                  <Typography variant="caption" display="block">
+                    {DATASET_TYPE_INFO[config.datasetType].description}
+                  </Typography>
+                </Alert>
+              )}
+              
               {/* Configuration Form */}
               <Box sx={{ mb: 3 }}>
                 <TextField
@@ -1216,93 +1320,125 @@ const DatasetCreation = ({ onNotification }) => {
       <Dialog
         open={labelingDialogOpen}
         onClose={() => setLabelingDialogOpen(false)}
-        maxWidth="md"
+        maxWidth="lg"
         fullWidth
       >
-        <DialogTitle>Label TV Screen</DialogTitle>
-        <DialogContent>
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            {config.datasetType && DATASET_TYPE_INFO[config.datasetType] && (
+              <Chip
+                label={`${DATASET_TYPE_INFO[config.datasetType].icon} ${DATASET_TYPE_INFO[config.datasetType].name}`}
+                color="primary"
+                variant="outlined"
+              />
+            )}
+            Label Image
+          </Box>
+        </DialogTitle>
+        <DialogContent sx={{ minHeight: 500 }}>
           {selectedImage && (
-            <Grid container spacing={3}>
-              <Grid item xs={12} md={6}>
-                <img
-                  src={selectedImage.thumbnail}
-                  alt="Screenshot"
-                  style={{
-                    width: '100%',
-                    height: 'auto',
-                    borderRadius: 8,
-                  }}
+            <Box>
+              {/* Render appropriate labeling interface based on dataset type */}
+              {config.datasetType === DATASET_TYPES.OBJECT_DETECTION && (
+                <ObjectDetectionLabeler
+                  image={selectedImage.thumbnail}
+                  labels={currentLabels}
+                  onLabelsChange={setCurrentLabels}
                 />
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <FormControl fullWidth margin="normal" size="small">
-                  <InputLabel>Screen Type</InputLabel>
-                  <Select
-                    value={currentLabels.screen_type}
-                    onChange={(e) => setCurrentLabels(prev => ({ ...prev, screen_type: e.target.value }))}
-                  >
-                    {Object.entries(SCREEN_STATES).map(([key, label]) => (
-                      <MenuItem key={key} value={key}>{label}</MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-
-                <FormControl fullWidth margin="normal" size="small">
-                  <InputLabel>App Name</InputLabel>
-                  <Select
-                    value={currentLabels.app_name}
-                    onChange={(e) => setCurrentLabels(prev => ({ ...prev, app_name: e.target.value }))}
-                  >
-                    <MenuItem value="">None</MenuItem>
-                    {COMMON_APPS.map((app) => (
-                      <MenuItem key={app} value={app}>{app}</MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-
-                <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>
-                  UI Elements Present
-                </Typography>
-                <FormGroup row>
-                  {UI_ELEMENTS.map((element) => (
-                    <FormControlLabel
-                      key={element}
-                      control={
-                        <Checkbox
-                          checked={currentLabels.ui_elements.includes(element)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setCurrentLabels(prev => ({
-                                ...prev,
-                                ui_elements: [...prev.ui_elements, element]
-                              }));
-                            } else {
-                              setCurrentLabels(prev => ({
-                                ...prev,
-                                ui_elements: prev.ui_elements.filter(el => el !== element)
-                              }));
-                            }
-                          }}
-                          size="small"
-                        />
-                      }
-                      label={element}
+              )}
+              
+              {config.datasetType === DATASET_TYPES.IMAGE_CLASSIFICATION && (
+                <ImageClassificationLabeler
+                  image={selectedImage.thumbnail}
+                  labels={currentLabels}
+                  onLabelsChange={setCurrentLabels}
+                />
+              )}
+              
+              {config.datasetType === DATASET_TYPES.VISION_LLM && (
+                <Grid container spacing={3}>
+                  <Grid item xs={12} md={6}>
+                    <img
+                      src={selectedImage.thumbnail}
+                      alt="Screenshot"
+                      style={{
+                        width: '100%',
+                        height: 'auto',
+                        borderRadius: 8,
+                      }}
                     />
-                  ))}
-                </FormGroup>
+                  </Grid>
+                  <Grid item xs={12} md={6}>
+                    <FormControl fullWidth margin="normal" size="small">
+                      <InputLabel>Screen Type</InputLabel>
+                      <Select
+                        value={currentLabels.screen_type}
+                        onChange={(e) => setCurrentLabels(prev => ({ ...prev, screen_type: e.target.value }))}
+                      >
+                        {Object.entries(SCREEN_STATES).map(([key, label]) => (
+                          <MenuItem key={key} value={key}>{label}</MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
 
-                <TextField
-                  fullWidth
-                  multiline
-                  rows={2}
-                  label="Notes"
-                  value={currentLabels.notes}
-                  onChange={(e) => setCurrentLabels(prev => ({ ...prev, notes: e.target.value }))}
-                  margin="normal"
-                  size="small"
-                />
-              </Grid>
-            </Grid>
+                    <FormControl fullWidth margin="normal" size="small">
+                      <InputLabel>App Name</InputLabel>
+                      <Select
+                        value={currentLabels.app_name}
+                        onChange={(e) => setCurrentLabels(prev => ({ ...prev, app_name: e.target.value }))}
+                      >
+                        <MenuItem value="">None</MenuItem>
+                        {COMMON_APPS.map((app) => (
+                          <MenuItem key={app} value={app}>{app}</MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+
+                    <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>
+                      UI Elements Present
+                    </Typography>
+                    <FormGroup row>
+                      {UI_ELEMENTS.map((element) => (
+                        <FormControlLabel
+                          key={element}
+                          control={
+                            <Checkbox
+                              checked={currentLabels.ui_elements.includes(element)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setCurrentLabels(prev => ({
+                                    ...prev,
+                                    ui_elements: [...prev.ui_elements, element]
+                                  }));
+                                } else {
+                                  setCurrentLabels(prev => ({
+                                    ...prev,
+                                    ui_elements: prev.ui_elements.filter(el => el !== element)
+                                  }));
+                                }
+                              }}
+                              size="small"
+                            />
+                          }
+                          label={element}
+                        />
+                      ))}
+                    </FormGroup>
+
+                    <TextField
+                      fullWidth
+                      multiline
+                      rows={2}
+                      label="Notes"
+                      value={currentLabels.notes}
+                      onChange={(e) => setCurrentLabels(prev => ({ ...prev, notes: e.target.value }))}
+                      margin="normal"
+                      size="small"
+                    />
+                  </Grid>
+                </Grid>
+              )}
+            </Box>
           )}
         </DialogContent>
         <DialogActions>
@@ -1349,6 +1485,14 @@ const DatasetCreation = ({ onNotification }) => {
           <Button onClick={() => setViewImageDialog(false)}>Close</Button>
         </DialogActions>
       </Dialog>
+
+      {/* Dataset Type Selector Dialog */}
+      <DatasetTypeSelector
+        open={showDatasetTypeSelector}
+        onClose={() => setShowDatasetTypeSelector(false)}
+        onSelect={handleDatasetTypeSelection}
+        currentConfig={config}
+      />
     </Box>
   );
 };

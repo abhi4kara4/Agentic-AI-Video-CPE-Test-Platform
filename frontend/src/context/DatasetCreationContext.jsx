@@ -39,6 +39,8 @@ export const DatasetCreationProvider = ({ children }) => {
     resolution: '1920x1080',
     macAddress: '',
     keySet: 'SKYQ',
+    datasetType: null, // 'vision_llm', 'object_detection', 'image_classification'
+    augmentationOptions: {}
   });
 
   // Platform state
