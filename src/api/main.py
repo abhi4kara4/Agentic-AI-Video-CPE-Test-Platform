@@ -202,6 +202,26 @@ async def capture_screenshot():
     }
 
 
+@app.get("/image/{filename}")
+async def get_screenshot_image(filename: str):
+    """Serve a screenshot image file"""
+    from fastapi.responses import FileResponse
+    import os
+    
+    # Look for the file in screenshots directory
+    screenshots_dir = Path("screenshots")
+    file_path = screenshots_dir / filename
+    
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Image not found")
+    
+    return FileResponse(
+        path=str(file_path),
+        media_type="image/jpeg",
+        filename=filename
+    )
+
+
 @app.get("/video/info")
 async def video_info():
     """Get video capture information"""

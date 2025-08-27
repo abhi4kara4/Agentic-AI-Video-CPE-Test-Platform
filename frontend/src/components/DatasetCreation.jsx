@@ -134,6 +134,25 @@ const DatasetCreation = ({ onNotification }) => {
     clearSession,
   } = useDatasetCreation();
 
+  // Generate thumbnail URL for display and full image URL for labeling
+  const getImageUrls = (image) => {
+    if (image.thumbnail) {
+      // Fresh capture with thumbnail
+      return {
+        thumbnailUrl: image.thumbnail,
+        fullImageUrl: image.thumbnail, // Use same for now, could be enhanced
+      };
+    } else if (image.filename) {
+      // Restored from session storage, use backend URLs
+      const fullImageUrl = videoAPI.getImageUrl(image.filename);
+      return {
+        thumbnailUrl: fullImageUrl, // Backend serves full resolution
+        fullImageUrl: fullImageUrl,
+      };
+    }
+    return { thumbnailUrl: null, fullImageUrl: null };
+  };
+
   // Panel sizing state (still local as it's UI-specific)
   const [panelSizes, setPanelSizes] = useState(loadPanelSizes());
   const [resizing, setResizing] = useState(null);
@@ -494,6 +513,16 @@ const DatasetCreation = ({ onNotification }) => {
   };
 
   const captureScreenshot = async () => {
+    // Check if dataset type is selected
+    if (!config.datasetType) {
+      onNotification({
+        type: 'warning',
+        title: 'Dataset Type Required',
+        message: 'Please select a dataset type before capturing screenshots. Initialize the platform first.'
+      });
+      return;
+    }
+
     try {
       const response = await videoAPI.captureScreenshot();
       
@@ -512,6 +541,7 @@ const DatasetCreation = ({ onNotification }) => {
       const newImage = {
         id: Date.now(),
         path: response.data.screenshot_path || `screenshot_${Date.now()}.jpg`,
+        filename: response.data.filename || `screenshot_${Date.now()}.jpg`,
         timestamp: response.data.timestamp || new Date().toISOString(),
         labels: null,
         thumbnail: thumbnailData
@@ -633,13 +663,60 @@ const DatasetCreation = ({ onNotification }) => {
   };
 
   const saveLabeledImage = async () => {
-    if (!currentDataset || !selectedImage) {
+    if (!selectedImage) {
       onNotification({
         type: 'error',
         title: 'Save Error',
-        message: 'Missing dataset or selected image'
+        message: 'No image selected for labeling'
       });
       return;
+    }
+
+    // If no dataset is selected, prompt user to create one
+    if (!currentDataset) {
+      const shouldCreateDataset = window.confirm(
+        'No dataset selected. Would you like to create a new dataset to save these labels?'
+      );
+      
+      if (shouldCreateDataset) {
+        const datasetName = prompt('Enter dataset name:');
+        if (!datasetName) {
+          return;
+        }
+        
+        try {
+          const datasetTypeInfo = DATASET_TYPE_INFO[config.datasetType];
+          const description = `${datasetTypeInfo.name} dataset for ${datasetTypeInfo.description.toLowerCase()}`;
+          
+          const response = await datasetAPI.createDataset(datasetName, description, {
+            datasetType: config.datasetType,
+            augmentationOptions: config.augmentationOptions,
+            supportedFormats: datasetTypeInfo.supportedFormats
+          });
+          
+          setCurrentDataset(response.data);
+          
+          onNotification({
+            type: 'success',
+            title: 'Dataset Created',
+            message: `Dataset "${datasetName}" created successfully. Now saving labels...`
+          });
+        } catch (error) {
+          onNotification({
+            type: 'error',
+            title: 'Dataset Creation Failed',
+            message: error.response?.data?.detail || error.message
+          });
+          return;
+        }
+      } else {
+        onNotification({
+          type: 'info',
+          title: 'Save Cancelled',
+          message: 'Please select or create a dataset to save labels'
+        });
+        return;
+      }
     }
     
     // Validate labels based on dataset type
@@ -1320,24 +1397,26 @@ const DatasetCreation = ({ onNotification }) => {
                   },
                 }}>
                   <Grid container spacing={1}> {/* Reduced spacing */}
-                    {capturedImages.map((image) => (
-                      <Grid item xs={4} sm={3} md={3} lg={2} key={image.id}> {/* Smaller grid items */}
-                        <Card
-                          sx={{
-                            cursor: 'pointer',
-                            border: image.labels ? '2px solid' : '1px solid',
-                            borderColor: image.labels ? 'success.main' : 'divider',
-                            '&:hover': { boxShadow: 2 },
-                            height: '100%',
-                          }}
-                        >
-                          <Box
+                    {capturedImages.map((image) => {
+                      const { thumbnailUrl } = getImageUrls(image);
+                      return (
+                        <Grid item xs={4} sm={3} md={3} lg={2} key={image.id}> {/* Smaller grid items */}
+                          <Card
                             sx={{
-                              position: 'relative',
-                              paddingTop: '56.25%', // 16:9 aspect ratio (smaller)
-                              bgcolor: 'grey.100',
-                              backgroundImage: image.thumbnail ? `url(${image.thumbnail})` : 'none',
-                              backgroundSize: 'cover',
+                              cursor: 'pointer',
+                              border: image.labels ? '2px solid' : '1px solid',
+                              borderColor: image.labels ? 'success.main' : 'divider',
+                              '&:hover': { boxShadow: 2 },
+                              height: '100%',
+                            }}
+                          >
+                            <Box
+                              sx={{
+                                position: 'relative',
+                                paddingTop: '56.25%', // 16:9 aspect ratio (smaller)
+                                bgcolor: 'grey.100',
+                                backgroundImage: thumbnailUrl ? `url(${thumbnailUrl})` : 'none',
+                                backgroundSize: 'cover',
                               backgroundPosition: 'center',
                               backgroundRepeat: 'no-repeat',
                             }}
@@ -1396,7 +1475,8 @@ const DatasetCreation = ({ onNotification }) => {
                           </Box>
                         </Card>
                       </Grid>
-                    ))}
+                      );
+                    })}
                   </Grid>
                 </Box>
               )}
@@ -1429,27 +1509,27 @@ const DatasetCreation = ({ onNotification }) => {
           {selectedImage && (
             <Box>
               {/* Render appropriate labeling interface based on dataset type */}
-              {config.datasetType === DATASET_TYPES.OBJECT_DETECTION && (
+              {config.datasetType === DATASET_TYPES.OBJECT_DETECTION && selectedImage && (
                 <ObjectDetectionLabeler
-                  image={selectedImage.thumbnail}
+                  image={getImageUrls(selectedImage).fullImageUrl}
                   labels={currentLabels}
                   onLabelsChange={setCurrentLabels}
                 />
               )}
               
-              {config.datasetType === DATASET_TYPES.IMAGE_CLASSIFICATION && (
+              {config.datasetType === DATASET_TYPES.IMAGE_CLASSIFICATION && selectedImage && (
                 <ImageClassificationLabeler
-                  image={selectedImage.thumbnail}
+                  image={getImageUrls(selectedImage).fullImageUrl}
                   labels={currentLabels}
                   onLabelsChange={setCurrentLabels}
                 />
               )}
               
-              {config.datasetType === DATASET_TYPES.VISION_LLM && (
+              {config.datasetType === DATASET_TYPES.VISION_LLM && selectedImage && (
                 <Grid container spacing={3}>
                   <Grid item xs={12} md={6}>
                     <img
-                      src={selectedImage.thumbnail}
+                      src={getImageUrls(selectedImage).fullImageUrl}
                       alt="Screenshot"
                       style={{
                         width: '100%',
@@ -1551,7 +1631,7 @@ const DatasetCreation = ({ onNotification }) => {
           {selectedImage && (
             <Box sx={{ textAlign: 'center' }}>
               <img
-                src={selectedImage.thumbnail}
+                src={getImageUrls(selectedImage).fullImageUrl}
                 alt="Screenshot"
                 style={{
                   maxWidth: '100%',

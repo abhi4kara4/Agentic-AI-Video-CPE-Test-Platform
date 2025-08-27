@@ -68,14 +68,15 @@ export const DatasetCreationProvider = ({ children }) => {
         streamActive,
         currentStep,
         streamUrl,
-        // Only save metadata for images, not the actual base64 data
+        // Save essential image data without thumbnails to save space
         capturedImages: capturedImages.map(img => ({
           id: img.id,
           timestamp: img.timestamp,
           path: img.path,
           labels: img.labels,
           datasetType: img.datasetType,
-          // Don't save thumbnail - it will be regenerated from backend
+          filename: img.path ? img.path.split('/').pop() : null,
+          // Don't save thumbnail - will be regenerated from backend
         })),
         videoInfo,
         currentDataset,
