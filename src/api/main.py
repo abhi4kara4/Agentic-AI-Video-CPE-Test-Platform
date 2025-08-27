@@ -38,11 +38,19 @@ class ConnectionManager:
         await websocket.send_text(message)
 
     async def broadcast(self, message: dict):
-        for connection in self.active_connections:
+        # Create a copy of the list to safely iterate while potentially modifying
+        connections_to_remove = []
+        for connection in self.active_connections.copy():
             try:
                 await connection.send_json(message)
-            except:
-                # Connection is broken, remove it
+            except Exception as e:
+                # Connection is broken, mark for removal
+                log.warning(f"WebSocket connection failed during broadcast: {e}")
+                connections_to_remove.append(connection)
+        
+        # Remove broken connections
+        for connection in connections_to_remove:
+            if connection in self.active_connections:
                 self.active_connections.remove(connection)
 
 manager = ConnectionManager()
@@ -519,6 +527,13 @@ class LabelImageRequest(BaseModel):
     notes: Optional[str] = ""
     label_data: Optional[Dict[str, Any]] = None
 
+class CreateDatasetRequest(BaseModel):
+    name: str
+    description: Optional[str] = ""
+    datasetType: Optional[str] = None
+    augmentationOptions: Optional[Dict[str, Any]] = None
+    supportedFormats: Optional[List[str]] = None
+
 
 @app.get("/dataset/list")
 async def list_datasets():
@@ -536,34 +551,53 @@ async def list_datasets():
 
 
 @app.post("/dataset/create")
-async def create_dataset(name: str, description: str = ""):
-    """Create a new dataset"""
-    dataset_id = str(uuid.uuid4())
-    dataset_dir = DATASETS_DIR / name
-    
-    if dataset_dir.exists():
-        raise HTTPException(status_code=400, detail="Dataset already exists")
-    
-    dataset_dir.mkdir(parents=True)
-    (dataset_dir / "images").mkdir()
-    (dataset_dir / "annotations").mkdir()
-    
-    metadata = {
-        "id": dataset_id,
-        "name": name,
-        "description": description,
-        "created_at": datetime.now().isoformat(),
-        "image_count": 0,
-        "screen_states": SCREEN_STATES
-    }
-    
-    with open(dataset_dir / "metadata.json", "w") as f:
-        json.dump(metadata, f, indent=2)
-    
-    # Broadcast dataset creation
-    await broadcast_update("dataset_created", metadata)
-    
-    return metadata
+async def create_dataset(request: CreateDatasetRequest):
+    """Create a new dataset with enhanced metadata"""
+    try:
+        log.info(f"Creating dataset: name={request.name}, type={request.datasetType}")
+        
+        dataset_id = str(uuid.uuid4())
+        dataset_dir = DATASETS_DIR / request.name
+        
+        if dataset_dir.exists():
+            log.warning(f"Dataset {request.name} already exists")
+            raise HTTPException(status_code=400, detail="Dataset already exists")
+        
+        dataset_dir.mkdir(parents=True)
+        (dataset_dir / "images").mkdir()
+        (dataset_dir / "annotations").mkdir()
+        
+        metadata = {
+            "id": dataset_id,
+            "name": request.name,
+            "description": request.description or "",
+            "dataset_type": request.datasetType,
+            "augmentation_options": request.augmentationOptions or {},
+            "supported_formats": request.supportedFormats or [],
+            "created_at": datetime.now().isoformat(),
+            "image_count": 0,
+            "screen_states": SCREEN_STATES
+        }
+        
+        with open(dataset_dir / "metadata.json", "w") as f:
+            json.dump(metadata, f, indent=2)
+        
+        # Broadcast dataset creation only if WebSocket clients exist
+        try:
+            if manager.active_connections:
+                await broadcast_update("dataset_created", metadata)
+        except Exception as broadcast_error:
+            log.warning(f"Failed to broadcast dataset creation: {broadcast_error}")
+            # Continue anyway - broadcasting is not critical
+        
+        log.info(f"Dataset {request.name} created successfully")
+        return metadata
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Failed to create dataset: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to create dataset: {str(e)}")
 
 
 @app.get("/dataset/{dataset_name}")

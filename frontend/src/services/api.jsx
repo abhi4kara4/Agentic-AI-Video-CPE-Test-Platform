@@ -78,8 +78,12 @@ export const analysisAPI = {
 
 // Dataset Management API
 export const datasetAPI = {
-  createDataset: (name, description) => 
-    apiClient.post('/dataset/create', { name, description }),
+  createDataset: (name, description, metadata = {}) => 
+    apiClient.post('/dataset/create', { 
+      name, 
+      description, 
+      ...metadata 
+    }),
   listDatasets: () => apiClient.get('/dataset/list'),
   getDataset: (datasetId) => apiClient.get(`/dataset/${datasetId}`),
   deleteDataset: (datasetId) => apiClient.delete(`/dataset/${datasetId}`),

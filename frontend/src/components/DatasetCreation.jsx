@@ -693,7 +693,6 @@ const DatasetCreation = ({ onNotification }) => {
             augmentationOptions: config.augmentationOptions,
             supportedFormats: datasetTypeInfo.supportedFormats
           });
-          
           setCurrentDataset(response.data);
           
           onNotification({
@@ -829,7 +828,6 @@ const DatasetCreation = ({ onNotification }) => {
         augmentationOptions: config.augmentationOptions,
         supportedFormats: datasetTypeInfo.supportedFormats
       });
-      
       setCurrentDataset(response.data);
       await loadDatasets();
       
