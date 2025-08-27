@@ -26,6 +26,7 @@ import {
   FormGroup,
   Alert,
   LinearProgress,
+  Divider,
 } from '@mui/material';
 import {
   PhotoCamera as CameraIcon,
@@ -45,6 +46,8 @@ import {
   ArrowBack as BackIcon,
   Download as DownloadIcon,
   Refresh as RefreshIcon,
+  DragHandle as DragHandleIcon,
+  RestartAlt as ResetIcon,
 } from '@mui/icons-material';
 import { videoAPI, deviceAPI, datasetAPI } from '../services/api.jsx';
 
@@ -76,7 +79,36 @@ const UI_ELEMENTS = [
 
 const KEY_SETS = ['SKYQ', 'PR1_T2', 'LC103'];
 
+// Load saved panel sizes from localStorage
+const loadPanelSizes = () => {
+  const saved = localStorage.getItem('datasetCreation_panelSizes');
+  if (saved) {
+    try {
+      return JSON.parse(saved);
+    } catch (e) {
+      console.warn('Failed to parse saved panel sizes');
+    }
+  }
+  return {
+    configHeight: 500,
+    videoHeight: 600,
+    datasetHeight: 350,
+    imagesHeight: 350,
+  };
+};
+
+// Save panel sizes to localStorage
+const savePanelSizes = (sizes) => {
+  localStorage.setItem('datasetCreation_panelSizes', JSON.stringify(sizes));
+};
+
 const DatasetCreation = ({ onNotification }) => {
+  // Panel sizing state
+  const [panelSizes, setPanelSizes] = useState(loadPanelSizes());
+  const [resizing, setResizing] = useState(null);
+  const resizeStartPos = useRef(null);
+  const resizeStartSize = useRef(null);
+
   // Configuration state
   const [config, setConfig] = useState({
     deviceId: '',
@@ -144,6 +176,85 @@ const DatasetCreation = ({ onNotification }) => {
       console.error('Failed to fetch video info:', error);
     }
   };
+
+  // Resize handlers
+  const handleResizeStart = (panelType, event) => {
+    setResizing(panelType);
+    resizeStartPos.current = event.clientY; // Always use Y for height resizing
+    resizeStartSize.current = panelSizes[panelType];
+    document.addEventListener('mousemove', handleResizeMove);
+    document.addEventListener('mouseup', handleResizeEnd);
+    event.preventDefault();
+  };
+
+  const handleResizeMove = (event) => {
+    if (!resizing || !resizeStartPos.current) return;
+    
+    const delta = event.clientY - resizeStartPos.current;
+    const newSize = Math.max(200, resizeStartSize.current + delta); // Minimum 200px
+    
+    setPanelSizes(prev => ({
+      ...prev,
+      [resizing]: newSize
+    }));
+  };
+
+  const handleResizeEnd = () => {
+    if (resizing) {
+      // Save to localStorage
+      const newSizes = { ...panelSizes };
+      savePanelSizes(newSizes);
+    }
+    
+    setResizing(null);
+    resizeStartPos.current = null;
+    resizeStartSize.current = null;
+    document.removeEventListener('mousemove', handleResizeMove);
+    document.removeEventListener('mouseup', handleResizeEnd);
+  };
+
+  // Reset panel sizes
+  const resetPanelSizes = () => {
+    const defaultSizes = {
+      configHeight: 500,
+      videoHeight: 600,
+      datasetHeight: 350,
+      imagesHeight: 350,
+    };
+    setPanelSizes(defaultSizes);
+    savePanelSizes(defaultSizes);
+  };
+
+  // Drag handle component
+  const DragHandle = ({ panelType, orientation = 'horizontal' }) => (
+    <Box
+      onMouseDown={(e) => handleResizeStart(panelType, e)}
+      sx={{
+        cursor: orientation === 'horizontal' ? 'ns-resize' : 'ew-resize',
+        backgroundColor: 'divider',
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        '&:hover': {
+          backgroundColor: 'primary.main',
+          opacity: 0.7,
+        },
+        height: orientation === 'horizontal' ? '8px' : '100%',
+        width: orientation === 'horizontal' ? '100%' : '8px',
+        userSelect: 'none',
+        zIndex: 10,
+      }}
+    >
+      <DragHandleIcon 
+        sx={{ 
+          fontSize: 16, 
+          color: 'text.secondary',
+          transform: orientation === 'horizontal' ? 'rotate(90deg)' : 'none'
+        }} 
+      />
+    </Box>
+  );
 
   const handleInitializePlatform = async () => {
     if (!config.deviceId || !config.macAddress) {
@@ -476,19 +587,31 @@ const DatasetCreation = ({ onNotification }) => {
   return (
     <Box sx={{ p: 3, maxWidth: '100%', height: 'calc(100vh - 150px)', overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
       {/* Header */}
-      <Box sx={{ mb: 3 }}>
-        <Typography variant="h4" fontWeight="bold" gutterBottom>
-          Dataset Creation
-        </Typography>
-        <Typography variant="body1" color="text.secondary">
-          Create labeled datasets for TV/STB vision model training
-        </Typography>
+      <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Box>
+          <Typography variant="h4" fontWeight="bold" gutterBottom>
+            Dataset Creation
+          </Typography>
+          <Typography variant="body1" color="text.secondary">
+            Create labeled datasets for TV/STB vision model training
+          </Typography>
+        </Box>
+        <Button
+          variant="outlined"
+          size="small"
+          startIcon={<ResetIcon />}
+          onClick={resetPanelSizes}
+          title="Reset panel sizes to default"
+        >
+          Reset Layout
+        </Button>
       </Box>
 
-      <Grid container spacing={3} sx={{ minHeight: '820px' }}>
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, minHeight: '820px' }}>
         {/* Top Row - Configuration and Video Stream */}
-        <Grid item xs={12} md={4} sx={{ height: '500px' }}>
-          <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+        <Box sx={{ display: 'flex', gap: 2, height: `${Math.max(panelSizes.configHeight, panelSizes.videoHeight)}px` }}>
+          <Box sx={{ flex: '0 0 400px', minWidth: '300px', maxWidth: '500px' }}>
+          <Card sx={{ height: `${panelSizes.configHeight}px`, display: 'flex', flexDirection: 'column' }}>
             <CardContent sx={{ flexGrow: 1, overflow: 'auto' }}>
               <Typography variant="h6" gutterBottom>
                 Platform Configuration
@@ -674,12 +797,14 @@ const DatasetCreation = ({ onNotification }) => {
               </Box>
             </CardContent>
           </Card>
+          </Box>
 
-        </Grid>
-
-        {/* Top Row - Video Stream */}
-        <Grid item xs={12} md={8} sx={{ height: '500px' }}>
-          <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+          {/* Horizontal Resize Handle */}
+          <DragHandle panelType="configHeight" orientation="horizontal" />
+          
+          {/* Video Stream */}
+          <Box sx={{ flexGrow: 1, minWidth: '400px' }}>
+          <Card sx={{ height: `${panelSizes.videoHeight}px`, display: 'flex', flexDirection: 'column' }}>
             <CardContent sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                 <Typography variant="h6">
@@ -766,11 +891,16 @@ const DatasetCreation = ({ onNotification }) => {
               )}
             </CardContent>
           </Card>
-        </Grid>
+          </Box>
+        </Box>
 
-        {/* Bottom Row - Dataset Management */}
-        <Grid item xs={12} md={6} sx={{ height: '300px' }}>
-          <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {/* Horizontal Resize Handle */}
+        <DragHandle panelType="datasetHeight" orientation="horizontal" />
+
+        {/* Bottom Row - Dataset Management and Captured Images */}
+        <Box sx={{ display: 'flex', gap: 2, height: `${Math.max(panelSizes.datasetHeight, panelSizes.imagesHeight)}px` }}>
+          <Box sx={{ flex: 1, minWidth: '300px' }}>
+          <Box sx={{ height: `${panelSizes.datasetHeight}px`, display: 'flex', flexDirection: 'column', gap: 2 }}>
             {/* Dataset Selection */}
             <Card sx={{ height: '140px' }}>
               <CardContent>
@@ -841,11 +971,14 @@ const DatasetCreation = ({ onNotification }) => {
               </CardContent>
             </Card>
           </Box>
-        </Grid>
+          </Box>
 
-        {/* Bottom Row - Captured Images */}
-        <Grid item xs={12} md={6} sx={{ height: '300px' }}>
-          <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+          {/* Vertical Panel Divider (for visual separation) */}
+          <Box sx={{ width: '2px', backgroundColor: 'divider' }} />
+
+          {/* Captured Images */}
+          <Box sx={{ flex: 1, minWidth: '300px' }}>
+          <Card sx={{ height: `${panelSizes.imagesHeight}px`, display: 'flex', flexDirection: 'column' }}>
             <CardContent sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
               <Typography variant="h6" gutterBottom>
                 Captured Images ({capturedImages.length})
@@ -941,8 +1074,9 @@ const DatasetCreation = ({ onNotification }) => {
               )}
             </CardContent>
           </Card>
-        </Grid>
-      </Grid>
+          </Box>
+        </Box>
+      </Box>
 
       {/* Labeling Dialog */}
       <Dialog
