@@ -545,6 +545,14 @@ async def list_datasets():
             if metadata_file.exists():
                 with open(metadata_file) as f:
                     metadata = json.load(f)
+                
+                # Update image count dynamically
+                image_dir = dataset_dir / "images"
+                if image_dir.exists():
+                    metadata["image_count"] = len(list(image_dir.glob("*.jpg")))
+                else:
+                    metadata["image_count"] = 0
+                    
                 datasets.append(metadata)
     
     return {"datasets": datasets}

@@ -1338,10 +1338,10 @@ const DatasetCreation = ({ onNotification }) => {
               <FormControl fullWidth size="small" sx={{ mb: 2 }}>
                 <InputLabel>Select Dataset</InputLabel>
                 <Select
-                  value={currentDataset?.id || ''}
+                  value={currentDataset && datasets.find(d => d.id === currentDataset.id) ? currentDataset.id : ''}
                   onChange={(e) => {
                     const dataset = datasets.find(d => d.id === e.target.value);
-                    setCurrentDataset(dataset);
+                    setCurrentDataset(dataset || null);
                   }}
                   displayEmpty
                 >
@@ -1568,6 +1568,46 @@ const DatasetCreation = ({ onNotification }) => {
             Label Image
           </Box>
         </DialogTitle>
+        
+        {/* Dataset Selection for Labeling */}
+        <Box sx={{ px: 3, py: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
+          <FormControl size="small" sx={{ minWidth: 300 }}>
+            <InputLabel>Save to Dataset</InputLabel>
+            <Select
+              value={currentDataset && datasets.find(d => d.id === currentDataset.id) ? currentDataset.id : ''}
+              onChange={(e) => {
+                const dataset = datasets.find(d => d.id === e.target.value);
+                setCurrentDataset(dataset || null);
+              }}
+              displayEmpty
+            >
+              <MenuItem value="">
+                <em>No dataset selected</em>
+              </MenuItem>
+              {datasets.map((dataset) => (
+                <MenuItem key={dataset.id} value={dataset.id}>
+                  {dataset.name} ({dataset.image_count || 0} images)
+                </MenuItem>
+              ))}
+            </Select>
+            <Box sx={{ mt: 1, display: 'flex', gap: 1, alignItems: 'center' }}>
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={createDataset}
+                disabled={isCreatingDataset}
+              >
+                {isCreatingDataset ? 'Creating...' : 'Create New Dataset'}
+              </Button>
+              {!currentDataset && (
+                <Typography variant="caption" color="error">
+                  Please select or create a dataset to save labels
+                </Typography>
+              )}
+            </Box>
+          </FormControl>
+        </Box>
+        
         <DialogContent sx={{ minHeight: 500 }}>
           {selectedImage && (
             <Box>
@@ -1707,7 +1747,7 @@ const DatasetCreation = ({ onNotification }) => {
                   <Typography variant="h6">Labels:</Typography>
                   <Typography>Screen Type: {SCREEN_STATES[selectedImage.labels.screen_type] || 'Unknown'}</Typography>
                   <Typography>App: {selectedImage.labels.app_name || 'None'}</Typography>
-                  <Typography>UI Elements: {selectedImage.labels.ui_elements.join(', ') || 'None'}</Typography>
+                  <Typography>UI Elements: {selectedImage.labels.ui_elements?.join(', ') || 'None'}</Typography>
                   <Typography>Notes: {selectedImage.labels.notes || 'None'}</Typography>
                 </Box>
               )}
