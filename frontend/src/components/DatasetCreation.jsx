@@ -1018,10 +1018,27 @@ const DatasetCreation = ({ onNotification }) => {
           {/* Captured Images */}
           <Box sx={{ flex: 1, minWidth: '300px' }}>
           <Card sx={{ height: `${panelSizes.imagesHeight}px`, display: 'flex', flexDirection: 'column' }}>
-            <CardContent sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-              <Typography variant="h6" gutterBottom>
-                Captured Images ({capturedImages.length})
-              </Typography>
+            <CardContent sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', minHeight: 0, pb: 1 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                <Typography variant="h6">
+                  Captured Images
+                </Typography>
+                <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                  <Chip 
+                    label={`${capturedImages.length} total`} 
+                    size="small" 
+                    color="primary"
+                    variant="outlined"
+                  />
+                  {capturedImages.filter(img => img.labels).length > 0 && (
+                    <Chip 
+                      label={`${capturedImages.filter(img => img.labels).length} labeled`} 
+                      size="small" 
+                      color="success"
+                    />
+                  )}
+                </Box>
+              </Box>
 
               {capturedImages.length === 0 ? (
                 <Box
@@ -1042,24 +1059,40 @@ const DatasetCreation = ({ onNotification }) => {
               ) : (
                 <Box sx={{ 
                   flexGrow: 1, 
-                  overflow: capturedImages.length > 15 ? 'auto' : 'visible',
-                  maxHeight: capturedImages.length > 15 ? '100%' : 'none'
+                  overflow: 'auto',
+                  maxHeight: '320px', // Fixed height for scrolling
+                  pr: 1, // Padding for scrollbar
+                  '&::-webkit-scrollbar': {
+                    width: '8px',
+                  },
+                  '&::-webkit-scrollbar-track': {
+                    bgcolor: 'grey.100',
+                    borderRadius: '4px',
+                  },
+                  '&::-webkit-scrollbar-thumb': {
+                    bgcolor: 'grey.400',
+                    borderRadius: '4px',
+                    '&:hover': {
+                      bgcolor: 'grey.500',
+                    },
+                  },
                 }}>
-                  <Grid container spacing={2}>
+                  <Grid container spacing={1}> {/* Reduced spacing */}
                     {capturedImages.map((image) => (
-                      <Grid item xs={6} sm={4} md={6} key={image.id}>
+                      <Grid item xs={4} sm={3} md={3} lg={2} key={image.id}> {/* Smaller grid items */}
                         <Card
                           sx={{
                             cursor: 'pointer',
                             border: image.labels ? '2px solid' : '1px solid',
                             borderColor: image.labels ? 'success.main' : 'divider',
-                            '&:hover': { boxShadow: 3 },
+                            '&:hover': { boxShadow: 2 },
+                            height: '100%',
                           }}
                         >
                           <Box
                             sx={{
                               position: 'relative',
-                              paddingTop: '75%', // 4:3 aspect ratio
+                              paddingTop: '56.25%', // 16:9 aspect ratio (smaller)
                               bgcolor: 'grey.100',
                               backgroundImage: image.thumbnail ? `url(${image.thumbnail})` : 'none',
                               backgroundSize: 'cover',
@@ -1069,39 +1102,49 @@ const DatasetCreation = ({ onNotification }) => {
                           >
                             {image.labels && (
                               <Chip
-                                label="Labeled"
+                                label="✓"
                                 color="success"
                                 size="small"
-                                sx={{ position: 'absolute', top: 4, right: 4 }}
+                                sx={{ 
+                                  position: 'absolute', 
+                                  top: 2, 
+                                  right: 2,
+                                  minWidth: '24px',
+                                  height: '20px',
+                                  fontSize: '12px'
+                                }}
                               />
                             )}
                           </Box>
-                          <Box sx={{ p: 1 }}>
-                            <Typography variant="caption" display="block" gutterBottom>
+                          <Box sx={{ p: 0.5 }}> {/* Reduced padding */}
+                            <Typography variant="caption" display="block" sx={{ fontSize: '10px', mb: 0.5 }}>
                               {new Date(image.timestamp).toLocaleTimeString()}
                             </Typography>
-                            <Box sx={{ display: 'flex', gap: 0.5 }}>
+                            <Box sx={{ display: 'flex', gap: 0.25, justifyContent: 'center' }}>
                               <IconButton
                                 size="small"
                                 onClick={() => openLabelingDialog(image)}
                                 title="Label Image"
+                                sx={{ padding: '4px' }}
                               >
-                                <LabelIcon />
+                                <LabelIcon sx={{ fontSize: '16px' }} />
                               </IconButton>
                               <IconButton 
                                 size="small"
                                 onClick={() => handleViewImage(image)}
                                 title="View Image"
+                                sx={{ padding: '4px' }}
                               >
-                                <ViewIcon />
+                                <ViewIcon sx={{ fontSize: '16px' }} />
                               </IconButton>
                               <IconButton 
                                 size="small" 
                                 color="error"
                                 onClick={() => handleDeleteImage(image.id)}
                                 title="Delete Image"
+                                sx={{ padding: '4px' }}
                               >
-                                <DeleteIcon />
+                                <DeleteIcon sx={{ fontSize: '16px' }} />
                               </IconButton>
                             </Box>
                           </Box>
