@@ -661,16 +661,20 @@ async def capture_to_dataset(dataset_name: str):
 @app.post("/dataset/{dataset_name}/label")
 async def label_image(dataset_name: str, request: LabelImageRequest):
     """Label an image in the dataset with extended support for different model types"""
-    dataset_dir = DATASETS_DIR / dataset_name
-    if not dataset_dir.exists():
-        raise HTTPException(status_code=404, detail="Dataset not found")
-    
-    # Create annotation based on label data type
-    annotation = {
-        "image_filename": request.image_name,
-        "labeled_at": datetime.now().isoformat(),
-        "notes": request.notes
-    }
+    try:
+        log.info(f"Labeling image: dataset={dataset_name}, image={request.image_name}, screen_type={request.screen_type}")
+        
+        dataset_dir = DATASETS_DIR / dataset_name
+        if not dataset_dir.exists():
+            log.warning(f"Dataset {dataset_name} not found")
+            raise HTTPException(status_code=404, detail="Dataset not found")
+        
+        # Create annotation based on label data type
+        annotation = {
+            "image_filename": request.image_name,
+            "labeled_at": datetime.now().isoformat(),
+            "notes": request.notes or ""
+        }
     
     if request.label_data:
         dataset_type = request.label_data.get('datasetType')
@@ -726,12 +730,23 @@ async def label_image(dataset_name: str, request: LabelImageRequest):
         json.dump(annotation, f, indent=2)
     
     # Broadcast image labeling
-    await broadcast_update("image_labeled", {
-        "dataset_name": dataset_name,
-        "annotation": annotation
-    })
+    try:
+        if manager.active_connections:
+            await broadcast_update("image_labeled", {
+                "dataset_name": dataset_name,
+                "annotation": annotation
+            })
+    except Exception as broadcast_error:
+        log.warning(f"Failed to broadcast image labeling: {broadcast_error}")
     
-    return annotation
+        log.info(f"Image {request.image_name} labeled successfully in dataset {dataset_name}")
+        return annotation
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Failed to label image: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to label image: {str(e)}")
 
 
 @app.get("/dataset/{dataset_name}/images")

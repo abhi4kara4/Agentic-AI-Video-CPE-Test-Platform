@@ -210,10 +210,17 @@ const DatasetCreation = ({ onNotification }) => {
   const loadDatasets = async () => {
     try {
       const response = await datasetAPI.listDatasets();
-      setDatasets(response.data?.datasets || []);
+      const loadedDatasets = response.data?.datasets || [];
+      setDatasets(loadedDatasets);
+      
+      // Clear currentDataset if it's not in the loaded datasets
+      if (currentDataset && !loadedDatasets.find(d => d.id === currentDataset.id)) {
+        setCurrentDataset(null);
+      }
     } catch (error) {
       console.error('Failed to load datasets:', error);
-      setDatasets([]); // Ensure datasets is always an array
+      setDatasets([]);
+      setCurrentDataset(null);
     }
   };
 
@@ -701,10 +708,24 @@ const DatasetCreation = ({ onNotification }) => {
             message: `Dataset "${datasetName}" created successfully. Now saving labels...`
           });
         } catch (error) {
+          let errorMessage = 'Unknown error occurred';
+          
+          if (error.response?.data?.detail) {
+            if (Array.isArray(error.response.data.detail)) {
+              errorMessage = error.response.data.detail.map(err => err.msg || err).join(', ');
+            } else if (typeof error.response.data.detail === 'string') {
+              errorMessage = error.response.data.detail;
+            } else {
+              errorMessage = JSON.stringify(error.response.data.detail);
+            }
+          } else if (error.message) {
+            errorMessage = error.message;
+          }
+          
           onNotification({
             type: 'error',
             title: 'Dataset Creation Failed',
-            message: error.response?.data?.detail || error.message
+            message: errorMessage
           });
           return;
         }
@@ -749,11 +770,22 @@ const DatasetCreation = ({ onNotification }) => {
         augmentationOptions: config.augmentationOptions
       };
       
+      // Determine screen_type based on dataset type
+      let screenType = '';
+      if (config.datasetType === DATASET_TYPES.IMAGE_CLASSIFICATION) {
+        screenType = currentLabels.className || '';
+      } else if (config.datasetType === DATASET_TYPES.VISION_LLM) {
+        screenType = currentLabels.screen_type || '';
+      } else {
+        // For object detection, use a default or generic screen type
+        screenType = 'other';
+      }
+      
       // Save to backend with enhanced data
       const response = await datasetAPI.labelImage(
         currentDataset.name,
         selectedImage.path.split('/').pop(),
-        config.datasetType === DATASET_TYPES.IMAGE_CLASSIFICATION ? currentLabels.className : currentLabels.screen_type,
+        screenType,
         currentLabels.notes || '',
         labelData
       );
@@ -793,10 +825,25 @@ const DatasetCreation = ({ onNotification }) => {
         message: `Image labeled successfully with ${labelCount} ${config.datasetType.replace('_', ' ')} label${labelCount !== 1 ? 's' : ''}`
       });
     } catch (error) {
+      let errorMessage = 'Unknown error occurred';
+      
+      if (error.response?.data?.detail) {
+        // Handle FastAPI validation errors
+        if (Array.isArray(error.response.data.detail)) {
+          errorMessage = error.response.data.detail.map(err => err.msg || err).join(', ');
+        } else if (typeof error.response.data.detail === 'string') {
+          errorMessage = error.response.data.detail;
+        } else {
+          errorMessage = JSON.stringify(error.response.data.detail);
+        }
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
       onNotification({
         type: 'error',
         title: 'Labeling Failed',
-        message: error.response?.data?.detail || error.message
+        message: errorMessage
       });
     }
   };
@@ -837,10 +884,24 @@ const DatasetCreation = ({ onNotification }) => {
         message: `${datasetTypeInfo.icon} ${datasetTypeInfo.name} dataset "${datasetName}" created successfully`
       });
     } catch (error) {
+      let errorMessage = 'Unknown error occurred';
+      
+      if (error.response?.data?.detail) {
+        if (Array.isArray(error.response.data.detail)) {
+          errorMessage = error.response.data.detail.map(err => err.msg || err).join(', ');
+        } else if (typeof error.response.data.detail === 'string') {
+          errorMessage = error.response.data.detail;
+        } else {
+          errorMessage = JSON.stringify(error.response.data.detail);
+        }
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
       onNotification({
         type: 'error',
         title: 'Dataset Creation Failed',
-        message: error.response?.data?.detail || error.message
+        message: errorMessage
       });
     } finally {
       setIsCreatingDataset(false);
@@ -1282,7 +1343,11 @@ const DatasetCreation = ({ onNotification }) => {
                     const dataset = datasets.find(d => d.id === e.target.value);
                     setCurrentDataset(dataset);
                   }}
+                  displayEmpty
                 >
+                  <MenuItem value="">
+                    <em>No dataset selected</em>
+                  </MenuItem>
                   {datasets.map((dataset) => (
                     <MenuItem key={dataset.id} value={dataset.id}>
                       {dataset.name} ({dataset.image_count || 0} images)

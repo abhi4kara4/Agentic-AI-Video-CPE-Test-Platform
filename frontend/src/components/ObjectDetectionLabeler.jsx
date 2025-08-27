@@ -18,7 +18,10 @@ import {
   Delete as DeleteIcon,
   Undo as UndoIcon,
   ZoomIn as ZoomInIcon,
-  ZoomOut as ZoomOutIcon
+  ZoomOut as ZoomOutIcon,
+  CenterFocusStrong as ResetIcon,
+  Pan as PanIcon,
+  Edit as LabelIcon
 } from '@mui/icons-material';
 
 import { OBJECT_DETECTION_CLASSES } from '../constants/datasetTypes.js';
@@ -26,21 +29,68 @@ import { OBJECT_DETECTION_CLASSES } from '../constants/datasetTypes.js';
 const ObjectDetectionLabeler = ({ image, labels, onLabelsChange }) => {
   const canvasRef = useRef(null);
   const imageRef = useRef(null); // Cache the loaded image
+  const zoomTimeoutRef = useRef(null); // Debounce zoom operations
   const [isDrawing, setIsDrawing] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState(null);
   const [startPos, setStartPos] = useState(null);
   const [currentBox, setCurrentBox] = useState(null);
   const [selectedClass, setSelectedClass] = useState('button');
   const [boundingBoxes, setBoundingBoxes] = useState(labels?.boundingBoxes || []);
   const [zoom, setZoom] = useState(1);
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 }); // Track pan offset
+  const [interactionMode, setInteractionMode] = useState('label'); // 'label' or 'pan'
   const [canvasSize, setCanvasSize] = useState({ width: 600, height: 400 });
   const [imageLoaded, setImageLoaded] = useState(false);
-  const [imageParams, setImageParams] = useState({ offsetX: 0, offsetY: 0, drawWidth: 0, drawHeight: 0 });
+  const [imageParams, setImageParams] = useState({ offsetX: 0, offsetY: 0, drawWidth: 0, drawHeight: 0, baseOffsetX: 0, baseOffsetY: 0 });
 
   useEffect(() => {
     if (imageLoaded) {
       drawCanvas();
     }
-  }, [boundingBoxes, zoom, imageLoaded]);
+  }, [boundingBoxes, zoom, imageLoaded, panOffset]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyPress = (event) => {
+      if (event.target.tagName !== 'INPUT' && event.target.tagName !== 'TEXTAREA') {
+        switch (event.key.toLowerCase()) {
+          case 'p':
+            toggleInteractionMode();
+            event.preventDefault();
+            break;
+          case '=':
+          case '+':
+            handleZoomIn();
+            event.preventDefault();
+            break;
+          case '-':
+            handleZoomOut();
+            event.preventDefault();
+            break;
+          case '0':
+            handleZoomReset();
+            event.preventDefault();
+            break;
+          case 'escape':
+            if (isDrawing) {
+              setIsDrawing(false);
+              setCurrentBox(null);
+              setStartPos(null);
+            }
+            if (isPanning) {
+              setIsPanning(false);
+              setPanStart(null);
+            }
+            event.preventDefault();
+            break;
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [isDrawing, isPanning]);
 
   useEffect(() => {
     onLabelsChange({
@@ -48,6 +98,13 @@ const ObjectDetectionLabeler = ({ image, labels, onLabelsChange }) => {
       boundingBoxes: boundingBoxes
     });
   }, [boundingBoxes]);
+
+  // Reset pan offset when zoom changes significantly or image changes
+  useEffect(() => {
+    if (zoom === 1) {
+      setPanOffset({ x: 0, y: 0 });
+    }
+  }, [zoom]);
 
   useEffect(() => {
     if (image) {
@@ -59,27 +116,48 @@ const ObjectDetectionLabeler = ({ image, labels, onLabelsChange }) => {
         // Cache the loaded image
         imageRef.current = img;
 
-        // Calculate aspect ratio and fit image to canvas
+        // Calculate aspect ratio and fit image to canvas with proper centering
         const aspectRatio = img.width / img.height;
-        let drawWidth, drawHeight;
+        const canvasAspectRatio = canvas.width / canvas.height;
         
-        if (aspectRatio > canvas.width / canvas.height) {
-          drawWidth = canvas.width * zoom;
-          drawHeight = drawWidth / aspectRatio;
+        let baseDrawWidth, baseDrawHeight;
+        
+        // Fit image to canvas maintaining aspect ratio
+        if (aspectRatio > canvasAspectRatio) {
+          // Image is wider - fit to width
+          baseDrawWidth = canvas.width * 0.9; // Leave 10% margin
+          baseDrawHeight = baseDrawWidth / aspectRatio;
         } else {
-          drawHeight = canvas.height * zoom;
-          drawWidth = drawHeight * aspectRatio;
+          // Image is taller - fit to height  
+          baseDrawHeight = canvas.height * 0.9; // Leave 10% margin
+          baseDrawWidth = baseDrawHeight * aspectRatio;
         }
 
-        const offsetX = (canvas.width - drawWidth) / 2;
-        const offsetY = (canvas.height - drawHeight) / 2;
+        // Apply zoom
+        const drawWidth = baseDrawWidth * zoom;
+        const drawHeight = baseDrawHeight * zoom;
 
-        setImageParams({ offsetX, offsetY, drawWidth, drawHeight });
+        // Center the image properly
+        const baseOffsetX = (canvas.width - baseDrawWidth) / 2;
+        const baseOffsetY = (canvas.height - baseDrawHeight) / 2;
+        
+        // Apply pan offset and zoom-adjusted centering
+        const offsetX = baseOffsetX - (drawWidth - baseDrawWidth) / 2 + panOffset.x;
+        const offsetY = baseOffsetY - (drawHeight - baseDrawHeight) / 2 + panOffset.y;
+
+        setImageParams({ 
+          offsetX, 
+          offsetY, 
+          drawWidth, 
+          drawHeight, 
+          baseOffsetX,
+          baseOffsetY
+        });
         setImageLoaded(true);
       };
       img.src = image;
     }
-  }, [image, zoom]);
+  }, [image, zoom, panOffset]);
 
   const drawCanvas = () => {
     const canvas = canvasRef.current;
@@ -147,14 +225,36 @@ const ObjectDetectionLabeler = ({ image, labels, onLabelsChange }) => {
 
   const handleMouseDown = (event) => {
     const pos = getCanvasCoordinates(event);
-    setIsDrawing(true);
-    setStartPos(pos);
+    
+    if (interactionMode === 'pan') {
+      setIsPanning(true);
+      setPanStart(pos);
+    } else {
+      setIsDrawing(true);
+      setStartPos(pos);
+    }
   };
 
   const handleMouseMove = (event) => {
+    const pos = getCanvasCoordinates(event);
+    
+    if (isPanning && panStart) {
+      // Handle panning
+      const deltaX = pos.x - panStart.x;
+      const deltaY = pos.y - panStart.y;
+      
+      setPanOffset(prev => ({
+        x: prev.x + deltaX,
+        y: prev.y + deltaY
+      }));
+      
+      setPanStart(pos);
+      return;
+    }
+    
     if (!isDrawing || !startPos) return;
 
-    const pos = getCanvasCoordinates(event);
+    // Handle bounding box drawing
     const width = pos.x - startPos.x;
     const height = pos.y - startPos.y;
 
@@ -167,13 +267,19 @@ const ObjectDetectionLabeler = ({ image, labels, onLabelsChange }) => {
 
     setCurrentBox(newBox);
     
-    // Use requestAnimationFrame to prevent flickering
+    // Trigger immediate redraw for smooth drawing
     requestAnimationFrame(() => {
       drawCanvas();
     });
   };
 
   const handleMouseUp = (event) => {
+    if (isPanning) {
+      setIsPanning(false);
+      setPanStart(null);
+      return;
+    }
+    
     if (!isDrawing || !currentBox) return;
 
     // Convert canvas coordinates to normalized coordinates relative to the actual image
@@ -216,11 +322,36 @@ const ObjectDetectionLabeler = ({ image, labels, onLabelsChange }) => {
   };
 
   const handleZoomIn = () => {
-    setZoom(prev => Math.min(prev + 0.2, 3));
+    // Clear any pending zoom operations for immediate response
+    if (zoomTimeoutRef.current) {
+      clearTimeout(zoomTimeoutRef.current);
+    }
+    
+    setZoom(prev => {
+      const newZoom = Math.min(prev + 0.3, 4); // Larger steps, higher max zoom
+      return newZoom;
+    });
   };
 
   const handleZoomOut = () => {
-    setZoom(prev => Math.max(prev - 0.2, 0.5));
+    // Clear any pending zoom operations for immediate response
+    if (zoomTimeoutRef.current) {
+      clearTimeout(zoomTimeoutRef.current);
+    }
+    
+    setZoom(prev => {
+      const newZoom = Math.max(prev - 0.3, 0.5); // Larger steps for faster response
+      return newZoom;
+    });
+  };
+
+  const handleZoomReset = () => {
+    setZoom(1);
+    setPanOffset({ x: 0, y: 0 });
+  };
+
+  const toggleInteractionMode = () => {
+    setInteractionMode(prev => prev === 'label' ? 'pan' : 'label');
   };
 
   return (
@@ -233,11 +364,26 @@ const ObjectDetectionLabeler = ({ image, labels, onLabelsChange }) => {
         {/* Canvas */}
         <Grid item xs={12} md={8}>
           <Paper sx={{ p: 2 }}>
+            {/* Mode and Zoom Controls */}
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-              <Typography variant="subtitle2">
-                Draw bounding boxes by clicking and dragging
+              <Typography variant="subtitle2" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Chip 
+                  label={interactionMode === 'label' ? 'Label Mode' : 'Pan Mode'} 
+                  color={interactionMode === 'label' ? 'primary' : 'secondary'}
+                  size="small"
+                />
+                {interactionMode === 'label' ? 'Draw bounding boxes' : 'Pan around image'}
               </Typography>
-              <Box sx={{ display: 'flex', gap: 1 }}>
+              <Box sx={{ display: 'flex', gap: 0.5 }}>
+                <Tooltip title={`Switch to ${interactionMode === 'label' ? 'Pan' : 'Label'} Mode`}>
+                  <IconButton 
+                    size="small" 
+                    onClick={toggleInteractionMode}
+                    color={interactionMode === 'pan' ? 'primary' : 'default'}
+                  >
+                    {interactionMode === 'label' ? <PanIcon /> : <LabelIcon />}
+                  </IconButton>
+                </Tooltip>
                 <Tooltip title="Zoom In">
                   <IconButton size="small" onClick={handleZoomIn}>
                     <ZoomInIcon />
@@ -248,7 +394,12 @@ const ObjectDetectionLabeler = ({ image, labels, onLabelsChange }) => {
                     <ZoomOutIcon />
                   </IconButton>
                 </Tooltip>
-                <Tooltip title="Clear All">
+                <Tooltip title="Reset Zoom & Pan">
+                  <IconButton size="small" onClick={handleZoomReset}>
+                    <ResetIcon />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="Clear All Boxes">
                   <IconButton size="small" color="error" onClick={handleClearAll}>
                     <UndoIcon />
                   </IconButton>
@@ -256,19 +407,44 @@ const ObjectDetectionLabeler = ({ image, labels, onLabelsChange }) => {
               </Box>
             </Box>
             
-            <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+            {/* Zoom Level Indicator */}
+            <Box sx={{ mb: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Typography variant="caption" color="text.secondary">
+                Zoom: {(zoom * 100).toFixed(0)}%
+              </Typography>
+              {zoom > 1 && (
+                <Typography variant="caption" color="text.secondary">
+                  Pan: ({panOffset.x.toFixed(0)}, {panOffset.y.toFixed(0)})
+                </Typography>
+              )}
+            </Box>
+            
+            <Box sx={{ 
+              border: '1px solid', 
+              borderColor: 'divider', 
+              borderRadius: 1,
+              overflow: 'hidden',
+              position: 'relative'
+            }}>
               <canvas
                 ref={canvasRef}
                 width={canvasSize.width}
                 height={canvasSize.height}
                 style={{ 
                   display: 'block', 
-                  cursor: 'crosshair',
-                  maxWidth: '100%'
+                  cursor: interactionMode === 'label' ? 'crosshair' : (isPanning ? 'grabbing' : 'grab'),
+                  maxWidth: '100%',
+                  userSelect: 'none'
                 }}
                 onMouseDown={handleMouseDown}
                 onMouseMove={handleMouseMove}
                 onMouseUp={handleMouseUp}
+                onMouseLeave={() => {
+                  if (isPanning) {
+                    setIsPanning(false);
+                    setPanStart(null);
+                  }
+                }}
               />
             </Box>
           </Paper>
