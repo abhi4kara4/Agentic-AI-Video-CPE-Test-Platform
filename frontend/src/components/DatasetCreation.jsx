@@ -90,10 +90,10 @@ const loadPanelSizes = () => {
     }
   }
   return {
-    configHeight: 500,
-    videoHeight: 600,
-    datasetHeight: 350,
-    imagesHeight: 350,
+    configHeight: 600,
+    videoHeight: 700,
+    datasetHeight: 400,
+    imagesHeight: 400,
   };
 };
 
@@ -216,10 +216,10 @@ const DatasetCreation = ({ onNotification }) => {
   // Reset panel sizes
   const resetPanelSizes = () => {
     const defaultSizes = {
-      configHeight: 500,
-      videoHeight: 600,
-      datasetHeight: 350,
-      imagesHeight: 350,
+      configHeight: 600,
+      videoHeight: 700,
+      datasetHeight: 400,
+      imagesHeight: 400,
     };
     setPanelSizes(defaultSizes);
     savePanelSizes(defaultSizes);
@@ -831,6 +831,15 @@ const DatasetCreation = ({ onNotification }) => {
                       sx={{ animation: 'pulse 2s infinite' }}
                     />
                   )}
+                  <Button
+                    variant="contained"
+                    startIcon={<CameraIcon />}
+                    onClick={captureScreenshot}
+                    disabled={!streamActive}
+                    size="small"
+                  >
+                    Capture
+                  </Button>
                 </Box>
               </Box>
 
@@ -870,17 +879,6 @@ const DatasetCreation = ({ onNotification }) => {
                 )}
               </Box>
 
-              <Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', gap: 2 }}>
-                <Button
-                  variant="contained"
-                  startIcon={<CameraIcon />}
-                  onClick={captureScreenshot}
-                  disabled={!streamActive} // Only require stream to be active
-                  size="large"
-                >
-                  Capture Screenshot
-                </Button>
-              </Box>
               
               {/* Video Info Debug Panel */}
               {videoInfo && streamActive && (
