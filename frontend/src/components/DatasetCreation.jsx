@@ -1336,8 +1336,8 @@ const DatasetCreation = ({ onNotification }) => {
           <Box sx={{ flex: 1, minWidth: '300px' }}>
           <Box sx={{ height: `${panelSizes.datasetHeight}px`, display: 'flex', flexDirection: 'column', gap: 2 }}>
             {/* Dataset Selection */}
-            <Card sx={{ height: '200px' }}>
-              <CardContent>
+            <Card sx={{ height: '250px' }}>
+              <CardContent sx={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                 <Typography variant="h6">
                   Dataset Management
@@ -1374,21 +1374,33 @@ const DatasetCreation = ({ onNotification }) => {
               </FormControl>
 
               {currentDataset && (
-                <Box sx={{ display: 'flex', gap: 1 }}>
-                  <Button
-                    variant="outlined"
-                    startIcon={<DownloadIcon />}
-                    onClick={exportDataset}
-                    size="small"
-                  >
-                    Export Training Data
-                  </Button>
-                  <Chip
-                    label={`${capturedImages.filter(img => img.labels).length} labeled`}
-                    color="success"
-                    size="small"
-                  />
+                <Box sx={{ mt: 2 }}>
+                  <Typography variant="subtitle2" gutterBottom>
+                    Training Data Export
+                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <Button
+                      variant="contained"
+                      startIcon={<DownloadIcon />}
+                      onClick={exportDataset}
+                      size="small"
+                      color="primary"
+                    >
+                      Export Training Data
+                    </Button>
+                    <Chip
+                      label={`${capturedImages.filter(img => img.labels).length} labeled`}
+                      color="success"
+                      size="small"
+                    />
+                  </Box>
                 </Box>
+              )}
+              
+              {!currentDataset && datasets.length > 0 && (
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block' }}>
+                  Select a dataset above to export training data
+                </Typography>
               )}
             </CardContent>
           </Card>
