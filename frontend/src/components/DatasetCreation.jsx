@@ -230,27 +230,32 @@ const DatasetCreation = ({ onNotification }) => {
     <Box
       onMouseDown={(e) => handleResizeStart(panelType, e)}
       sx={{
-        cursor: orientation === 'horizontal' ? 'ns-resize' : 'ew-resize',
-        backgroundColor: 'divider',
+        cursor: 'ns-resize', // Always vertical resize for height changes
+        backgroundColor: 'grey.300',
         position: 'relative',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         '&:hover': {
           backgroundColor: 'primary.main',
-          opacity: 0.7,
+          opacity: 0.8,
         },
-        height: orientation === 'horizontal' ? '8px' : '100%',
-        width: orientation === 'horizontal' ? '100%' : '8px',
+        '&:active': {
+          backgroundColor: 'primary.dark',
+        },
+        height: '12px',
+        width: '100%',
         userSelect: 'none',
         zIndex: 10,
+        borderRadius: '4px',
+        transition: 'background-color 0.2s ease',
       }}
     >
       <DragHandleIcon 
         sx={{ 
-          fontSize: 16, 
+          fontSize: 18, 
           color: 'text.secondary',
-          transform: orientation === 'horizontal' ? 'rotate(90deg)' : 'none'
+          transform: 'rotate(90deg)'
         }} 
       />
     </Box>
@@ -607,9 +612,9 @@ const DatasetCreation = ({ onNotification }) => {
         </Button>
       </Box>
 
-      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, minHeight: '820px' }}>
+      <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '820px' }}>
         {/* Top Row - Configuration and Video Stream */}
-        <Box sx={{ display: 'flex', gap: 2, height: `${Math.max(panelSizes.configHeight, panelSizes.videoHeight)}px` }}>
+        <Box sx={{ display: 'flex', gap: 2, mb: 1 }}>
           <Box sx={{ flex: '0 0 400px', minWidth: '300px', maxWidth: '500px' }}>
           <Card sx={{ height: `${panelSizes.configHeight}px`, display: 'flex', flexDirection: 'column' }}>
             <CardContent sx={{ flexGrow: 1, overflow: 'auto' }}>
@@ -799,8 +804,7 @@ const DatasetCreation = ({ onNotification }) => {
           </Card>
           </Box>
 
-          {/* Horizontal Resize Handle */}
-          <DragHandle panelType="configHeight" orientation="horizontal" />
+          {/* This handle doesn't make sense here - remove it */}
           
           {/* Video Stream */}
           <Box sx={{ flexGrow: 1, minWidth: '400px' }}>
@@ -871,7 +875,7 @@ const DatasetCreation = ({ onNotification }) => {
                   variant="contained"
                   startIcon={<CameraIcon />}
                   onClick={captureScreenshot}
-                  disabled={!streamActive || !deviceLocked}
+                  disabled={!streamActive} // Only require stream to be active
                   size="large"
                 >
                   Capture Screenshot
@@ -895,7 +899,9 @@ const DatasetCreation = ({ onNotification }) => {
         </Box>
 
         {/* Horizontal Resize Handle */}
-        <DragHandle panelType="datasetHeight" orientation="horizontal" />
+        <Box sx={{ py: 1 }}>
+          <DragHandle panelType="datasetHeight" orientation="horizontal" />
+        </Box>
 
         {/* Bottom Row - Dataset Management and Captured Images */}
         <Box sx={{ display: 'flex', gap: 2, height: `${Math.max(panelSizes.datasetHeight, panelSizes.imagesHeight)}px` }}>
