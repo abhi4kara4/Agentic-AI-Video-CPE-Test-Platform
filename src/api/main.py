@@ -181,7 +181,24 @@ async def capture_screenshot():
     if not screenshot_path:
         raise HTTPException(status_code=500, detail="Failed to capture screenshot")
     
-    return {"screenshot_path": screenshot_path, "timestamp": datetime.now().isoformat()}
+    # Also get the current frame and encode as base64 for frontend thumbnail
+    base64_image = None
+    try:
+        frame = orchestrator.video_capture.get_frame()
+        if frame is not None:
+            _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            import base64
+            base64_image = base64.b64encode(buffer.tobytes()).decode('utf-8')
+            log.info("Screenshot captured with base64 thumbnail")
+    except Exception as e:
+        log.warning(f"Failed to generate base64 thumbnail: {e}")
+    
+    return {
+        "screenshot_path": screenshot_path, 
+        "base64_image": base64_image,
+        "filename": screenshot_path.split('/')[-1] if screenshot_path else None,
+        "timestamp": datetime.now().isoformat()
+    }
 
 
 @app.get("/video/info")

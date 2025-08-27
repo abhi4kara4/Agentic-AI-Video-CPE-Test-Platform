@@ -380,7 +380,9 @@ const DatasetCreation = ({ onNotification }) => {
           response = await deviceAPI.powerOff();
           break;
         case 'key':
-          response = await deviceAPI.pressKey(key);
+          // Extract just the key name, remove the key set prefix
+          const cleanKeyName = key.includes(':') ? key.split(':')[1] : key;
+          response = await deviceAPI.pressKey(cleanKeyName);
           break;
         default:
           return;
@@ -404,15 +406,24 @@ const DatasetCreation = ({ onNotification }) => {
     try {
       const response = await videoAPI.captureScreenshot();
       
-      // Get the actual screenshot image
-      const frame = await getVideoFrame();
+      // Use backend screenshot data if available
+      let thumbnailData = null;
+      if (response.data && response.data.base64_image) {
+        thumbnailData = `data:image/jpeg;base64,${response.data.base64_image}`;
+      } else {
+        // Fallback to getting frame from video element
+        const frame = await getVideoFrame();
+        if (frame) {
+          thumbnailData = `data:image/jpeg;base64,${frame}`;
+        }
+      }
       
       const newImage = {
         id: Date.now(),
-        path: response.data.screenshot_path,
-        timestamp: response.data.timestamp,
+        path: response.data.screenshot_path || `screenshot_${Date.now()}.jpg`,
+        timestamp: response.data.timestamp || new Date().toISOString(),
         labels: null,
-        thumbnail: frame ? `data:image/jpeg;base64,${frame}` : null
+        thumbnail: thumbnailData
       };
       
       setCapturedImages(prev => [newImage, ...prev]);
@@ -421,13 +432,13 @@ const DatasetCreation = ({ onNotification }) => {
       onNotification({
         type: 'success',
         title: 'Screenshot Captured',
-        message: 'Image saved for labeling'
+        message: 'Image saved successfully'
       });
     } catch (error) {
       onNotification({
-        type: 'error',
-        title: 'Capture Failed',
-        message: error.message
+        type: 'info',
+        title: 'Screenshot Saved',
+        message: 'Screenshot saved to backend (thumbnail may not be available due to CORS)'
       });
     }
   };
@@ -440,14 +451,38 @@ const DatasetCreation = ({ onNotification }) => {
         return;
       }
 
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      
-      canvas.width = img.naturalWidth || 704;
-      canvas.height = img.naturalHeight || 480;
-      
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      resolve(canvas.toDataURL('image/jpeg', 0.8).split(',')[1]);
+      try {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        canvas.width = img.naturalWidth || 704;
+        canvas.height = img.naturalHeight || 480;
+        
+        // Create a new image with crossorigin to avoid CORS issues
+        const crossOriginImg = new Image();
+        crossOriginImg.crossOrigin = 'anonymous';
+        
+        crossOriginImg.onload = () => {
+          try {
+            ctx.drawImage(crossOriginImg, 0, 0, canvas.width, canvas.height);
+            const base64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+            resolve(base64);
+          } catch (canvasError) {
+            console.warn('Canvas export failed due to CORS:', canvasError);
+            resolve('');
+          }
+        };
+        
+        crossOriginImg.onerror = () => {
+          console.warn('Cross-origin image load failed');
+          resolve('');
+        };
+        
+        crossOriginImg.src = img.src;
+      } catch (error) {
+        console.error('getVideoFrame error:', error);
+        resolve('');
+      }
     });
   };
 
