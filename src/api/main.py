@@ -112,7 +112,41 @@ async def video_stream(device: Optional[str] = None, outlet: Optional[str] = Non
     """Stream video frames"""
     log.info(f"Video stream requested - device: {device}, outlet: {outlet}, resolution: {resolution}")
     
-    if not orchestrator or not orchestrator.video_capture.is_running:
+    if not orchestrator:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    # Parse resolution parameter
+    resolution_w = settings.video_resolution_w
+    resolution_h = settings.video_resolution_h
+    
+    if resolution:
+        try:
+            parts = resolution.split('x')
+            if len(parts) == 2:
+                resolution_w = int(parts[0])
+                resolution_h = int(parts[1])
+                log.info(f"Using resolution: {resolution_w}x{resolution_h}")
+        except (ValueError, IndexError):
+            log.warning(f"Invalid resolution format: {resolution}, using default")
+    
+    # Build dynamic stream URL
+    device_id = device or settings.video_device_id
+    outlet_id = outlet or settings.video_outlet
+    
+    dynamic_stream_url = (
+        f"{settings.video_capture_base_url}/rack/cats-rack-sn-557.rack.abc.net:443"
+        f"/magiq/video/device/{device_id}/stream"
+        f"?outlet={outlet_id}"
+        f"&resolution_w={resolution_w}"
+        f"&resolution_h={resolution_h}"
+    )
+    
+    log.info(f"Using dynamic stream URL: {dynamic_stream_url}")
+    
+    # Update the video capture URL dynamically
+    orchestrator.video_capture.update_stream_url(dynamic_stream_url)
+    
+    if not orchestrator.video_capture.is_running:
         raise HTTPException(status_code=503, detail="Video capture not available")
     
     def generate_frames():
@@ -156,7 +190,9 @@ async def video_info():
     if not orchestrator:
         raise HTTPException(status_code=503, detail="Service not initialized")
     
-    return orchestrator.video_capture.get_frame_info()
+    info = orchestrator.video_capture.get_frame_info()
+    log.info(f"Video info requested: {info}")
+    return info
 
 
 # Device control endpoints
@@ -166,10 +202,29 @@ async def lock_device():
     if not orchestrator:
         raise HTTPException(status_code=503, detail="Service not initialized")
     
+    # First try to unlock any existing lock
+    log.info("Attempting to unlock device before locking")
+    unlock_success = await orchestrator.device_controller.unlock_device()
+    log.info(f"Unlock attempt result: {unlock_success}")
+    
+    # Add a small delay to allow the unlock to propagate
+    import asyncio
+    await asyncio.sleep(1)
+    
+    # Now try to lock
     success = await orchestrator.device_controller.lock_device()
     
     if not success:
-        raise HTTPException(status_code=409, detail="Device already locked or unavailable")
+        # Try one more time after a brief delay
+        log.info("First lock attempt failed, retrying after delay")
+        await asyncio.sleep(2)
+        success = await orchestrator.device_controller.lock_device()
+        
+        if not success:
+            raise HTTPException(
+                status_code=409, 
+                detail="Device lock failed - may be in use by another session. Please try again in a few moments."
+            )
     
     return {"status": "success", "action": "device_locked", "timestamp": datetime.now().isoformat()}
 

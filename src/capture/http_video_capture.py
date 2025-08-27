@@ -20,6 +20,7 @@ class HttpVideoCapture:
     def __init__(self, stream_url: Optional[str] = None, auth_token: Optional[str] = None):
         self.stream_url = stream_url or settings.video_stream_url
         self.auth_token = auth_token or getattr(settings, 'device_auth_token', None)
+        self.current_resolution = None  # Track current resolution
         self.session: Optional[aiohttp.ClientSession] = None
         self.is_running = False
         self.frame_queue = Queue(maxsize=10)
@@ -355,8 +356,22 @@ class HttpVideoCapture:
             "fps_actual": self.fps_actual,
             "resolution": resolution,
             "has_frame": frame is not None,
-            "stream_url": self.stream_url
+            "stream_url": self.stream_url,
+            "current_resolution": self.current_resolution
         }
+    
+    def update_stream_url(self, new_url: str):
+        """Update the stream URL dynamically"""
+        if new_url != self.stream_url:
+            log.info(f"Updating stream URL from {self.stream_url} to {new_url}")
+            self.stream_url = new_url
+            # Extract resolution from URL for tracking
+            import re
+            resolution_match = re.search(r'resolution_w=(\d+).*?resolution_h=(\d+)', new_url)
+            if resolution_match:
+                width, height = resolution_match.groups()
+                self.current_resolution = f"{width}x{height}"
+                log.info(f"Stream resolution updated to: {self.current_resolution}")
     
     def stop(self):
         """Stop video capture"""

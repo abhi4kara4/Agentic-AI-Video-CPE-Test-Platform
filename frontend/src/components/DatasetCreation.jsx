@@ -96,6 +96,7 @@ const DatasetCreation = ({ onNotification }) => {
   const videoRef = useRef(null);
   const [streamUrl, setStreamUrl] = useState('');
   const [capturedImages, setCapturedImages] = useState([]);
+  const [videoInfo, setVideoInfo] = useState(null);
 
   // Dataset management
   const [currentDataset, setCurrentDataset] = useState(null);
@@ -134,6 +135,16 @@ const DatasetCreation = ({ onNotification }) => {
     }
   };
 
+  const fetchVideoInfo = async () => {
+    try {
+      const response = await videoAPI.getVideoInfo();
+      setVideoInfo(response.data);
+      console.log('Video info:', response.data);
+    } catch (error) {
+      console.error('Failed to fetch video info:', error);
+    }
+  };
+
   const handleInitializePlatform = async () => {
     if (!config.deviceId || !config.macAddress) {
       onNotification({
@@ -152,6 +163,11 @@ const DatasetCreation = ({ onNotification }) => {
       
       setIsInitialized(true);
       setCurrentStep(1);
+      
+      // Fetch video info to confirm resolution
+      setTimeout(() => {
+        fetchVideoInfo();
+      }, 1000);
       
       onNotification({
         type: 'success',
@@ -178,6 +194,11 @@ const DatasetCreation = ({ onNotification }) => {
       setStreamUrl(newStreamUrl);
       setStreamActive(true);
       
+      // Fetch video info to confirm new resolution
+      setTimeout(() => {
+        fetchVideoInfo();
+      }, 1000);
+      
       onNotification({
         type: 'info',
         title: 'Stream Updated',
@@ -197,12 +218,12 @@ const DatasetCreation = ({ onNotification }) => {
           message: 'Device is now available for others'
         });
       } else {
-        // First unlock any existing lock, then lock
-        try {
-          await deviceAPI.unlockDevice();
-        } catch (e) {
-          // Ignore unlock errors
-        }
+        // Show loading state
+        onNotification({
+          type: 'info',
+          title: 'Locking Device',
+          message: 'Attempting to lock device...'
+        });
         
         await deviceAPI.lockDevice();
         setDeviceLocked(true);
@@ -214,10 +235,20 @@ const DatasetCreation = ({ onNotification }) => {
         });
       }
     } catch (error) {
+      let errorMessage = 'Unknown error occurred';
+      
+      if (error.response?.status === 409) {
+        errorMessage = error.response?.data?.detail || 'Device is currently in use by another session. Please try again in a few moments.';
+      } else if (error.response?.data?.detail) {
+        errorMessage = error.response.data.detail;
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
       onNotification({
         type: 'error',
-        title: 'Device Control Failed',
-        message: error.response?.data?.detail || error.message
+        title: 'Device Lock Failed',
+        message: errorMessage
       });
     }
   };
@@ -443,7 +474,7 @@ const DatasetCreation = ({ onNotification }) => {
   ];
 
   return (
-    <Box sx={{ p: 3, maxWidth: '100%', height: 'calc(100vh - 150px)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+    <Box sx={{ p: 3, maxWidth: '100%', height: 'calc(100vh - 150px)', overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
       {/* Header */}
       <Box sx={{ mb: 3 }}>
         <Typography variant="h4" fontWeight="bold" gutterBottom>
@@ -454,9 +485,9 @@ const DatasetCreation = ({ onNotification }) => {
         </Typography>
       </Box>
 
-      <Grid container spacing={3} sx={{ flexGrow: 1, minHeight: 0 }}>
+      <Grid container spacing={3} sx={{ minHeight: '720px' }}>
         {/* Top Row - Configuration and Video Stream */}
-        <Grid item xs={12} md={4} sx={{ height: '60%' }}>
+        <Grid item xs={12} md={4} sx={{ height: '400px' }}>
           <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
             <CardContent sx={{ flexGrow: 1, overflow: 'auto' }}>
               <Typography variant="h6" gutterBottom>
@@ -647,21 +678,31 @@ const DatasetCreation = ({ onNotification }) => {
         </Grid>
 
         {/* Top Row - Video Stream */}
-        <Grid item xs={12} md={8} sx={{ height: '60%' }}>
+        <Grid item xs={12} md={8} sx={{ height: '400px' }}>
           <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
             <CardContent sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                 <Typography variant="h6">
                   Live Video Stream
                 </Typography>
-                {streamActive && (
-                  <Chip
-                    label="LIVE"
-                    color="error"
-                    size="small"
-                    sx={{ animation: 'pulse 2s infinite' }}
-                  />
-                )}
+                <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                  {videoInfo && videoInfo.current_resolution && (
+                    <Chip
+                      label={videoInfo.current_resolution}
+                      color="primary"
+                      size="small"
+                      variant="outlined"
+                    />
+                  )}
+                  {streamActive && (
+                    <Chip
+                      label="LIVE"
+                      color="success"
+                      size="small"
+                      sx={{ animation: 'pulse 2s infinite' }}
+                    />
+                  )}
+                </Box>
               </Box>
 
               <Box 
@@ -711,15 +752,27 @@ const DatasetCreation = ({ onNotification }) => {
                   Capture Screenshot
                 </Button>
               </Box>
+              
+              {/* Video Info Debug Panel */}
+              {videoInfo && streamActive && (
+                <Box sx={{ mt: 2, p: 1, bgcolor: 'grey.100', borderRadius: 1 }}>
+                  <Typography variant="caption" display="block">
+                    <strong>Stream Info:</strong> {videoInfo.current_resolution || 'Unknown'} • 
+                    FPS: {videoInfo.fps_actual?.toFixed(1) || 'N/A'} • 
+                    Status: {videoInfo.status}
+                    {videoInfo.resolution && ` • Frame: ${videoInfo.resolution[0]}x${videoInfo.resolution[1]}`}
+                  </Typography>
+                </Box>
+              )}
             </CardContent>
           </Card>
         </Grid>
 
         {/* Bottom Row - Dataset Management */}
-        <Grid item xs={12} md={6} sx={{ height: '40%' }}>
+        <Grid item xs={12} md={6} sx={{ height: '300px' }}>
           <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 2 }}>
             {/* Dataset Selection */}
-            <Card sx={{ minHeight: '120px' }}>
+            <Card sx={{ height: '140px' }}>
               <CardContent>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                 <Typography variant="h6">
@@ -791,7 +844,7 @@ const DatasetCreation = ({ onNotification }) => {
         </Grid>
 
         {/* Bottom Row - Captured Images */}
-        <Grid item xs={12} md={6} sx={{ height: '40%' }}>
+        <Grid item xs={12} md={6} sx={{ height: '300px' }}>
           <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
             <CardContent sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
               <Typography variant="h6" gutterBottom>
@@ -815,7 +868,11 @@ const DatasetCreation = ({ onNotification }) => {
                   </Typography>
                 </Box>
               ) : (
-                <Box sx={{ flexGrow: 1, overflow: 'auto' }}>
+                <Box sx={{ 
+                  flexGrow: 1, 
+                  overflow: capturedImages.length > 15 ? 'auto' : 'visible',
+                  maxHeight: capturedImages.length > 15 ? '100%' : 'none'
+                }}>
                   <Grid container spacing={2}>
                     {capturedImages.map((image) => (
                       <Grid item xs={6} sm={4} md={6} key={image.id}>

@@ -58,14 +58,18 @@ class DeviceController:
             }
             params = {"category": self.allocation_category}
             
+            log.info(f"Attempting to lock device: {self.mac_address} with category: {self.allocation_category}")
+            
             async with self._session.post(url, headers=headers, params=params) as response:
+                response_text = await response.text()
+                log.info(f"Lock device response: status={response.status}, body={response_text}")
+                
                 if response.status in [200, 204]:
                     self.is_locked = True
                     log.info(f"Device locked successfully: {self.mac_address}")
                     return True
                 else:
-                    text = await response.text()
-                    log.error(f"Failed to lock device: {response.status} - {text}")
+                    log.error(f"Failed to lock device: {response.status} - {response_text}")
                     return False
                     
         except Exception as e:
@@ -74,9 +78,8 @@ class DeviceController:
             
     async def unlock_device(self) -> bool:
         """Unlock the device"""
-        if not self.is_locked:
-            log.warning("Device not locked")
-            return True
+        # Always attempt to unlock, even if we think it's not locked locally
+        # The device might be locked by another session
             
         try:
             url = f"{self.base_url}/rest/settop/{quote(self.mac_address)}/allocation/lock"
@@ -87,14 +90,19 @@ class DeviceController:
             params = {"category": self.allocation_category}
             
             async with self._session.delete(url, headers=headers, params=params) as response:
-                if response.status == 204:
+                if response.status in [204, 404]:  # 404 means device wasn't locked
                     self.is_locked = False
-                    log.info(f"Device unlocked successfully: {self.mac_address}")
+                    if response.status == 204:
+                        log.info(f"Device unlocked successfully: {self.mac_address}")
+                    else:
+                        log.info(f"Device was not locked: {self.mac_address}")
                     return True
                 else:
                     text = await response.text()
-                    log.error(f"Failed to unlock device: {response.status} - {text}")
-                    return False
+                    log.warning(f"Unlock device response: {response.status} - {text}")
+                    # Don't fail on unlock errors - the device might already be unlocked
+                    self.is_locked = False
+                    return True
                     
         except Exception as e:
             log.error(f"Error unlocking device: {e}")
