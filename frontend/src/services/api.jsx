@@ -102,6 +102,8 @@ export const datasetAPI = {
     apiClient.get(`/dataset/${datasetId}/images/${imageId}`),
   
   // Dataset operations
+  captureToDataset: (datasetName) => 
+    apiClient.post(`/dataset/${datasetName}/capture`),
   labelImage: (datasetName, imageName, screenType, notes, labelData = null) =>
     apiClient.post(`/dataset/${datasetName}/label`, { 
       image_name: imageName,

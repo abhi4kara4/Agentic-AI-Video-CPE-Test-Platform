@@ -530,8 +530,18 @@ const DatasetCreation = ({ onNotification }) => {
       return;
     }
 
+    // Check if dataset is selected
+    if (!currentDataset) {
+      onNotification({
+        type: 'warning',
+        title: 'Dataset Required',
+        message: 'Please select or create a dataset before capturing screenshots.'
+      });
+      return;
+    }
+
     try {
-      const response = await videoAPI.captureScreenshot();
+      const response = await datasetAPI.captureToDataset(currentDataset.name);
       
       // Use backend screenshot data if available
       let thumbnailData = null;
@@ -562,12 +572,19 @@ const DatasetCreation = ({ onNotification }) => {
         title: 'Screenshot Captured',
         message: 'Image saved successfully'
       });
+      
+      // Refresh dataset list to update image count
+      await loadDatasets();
+      
     } catch (error) {
       onNotification({
         type: 'info',
         title: 'Screenshot Saved',
         message: 'Screenshot saved to backend (thumbnail may not be available due to CORS)'
       });
+      
+      // Still refresh dataset list in case image was saved
+      await loadDatasets();
     }
   };
 
@@ -1319,7 +1336,7 @@ const DatasetCreation = ({ onNotification }) => {
           <Box sx={{ flex: 1, minWidth: '300px' }}>
           <Box sx={{ height: `${panelSizes.datasetHeight}px`, display: 'flex', flexDirection: 'column', gap: 2 }}>
             {/* Dataset Selection */}
-            <Card sx={{ height: '140px' }}>
+            <Card sx={{ height: '200px' }}>
               <CardContent>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                 <Typography variant="h6">
