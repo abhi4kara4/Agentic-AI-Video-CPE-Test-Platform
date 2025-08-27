@@ -191,7 +191,7 @@ export class WebSocketManager {
     this.reconnectAttempts = 0;
   }
   
-  connect(url = `ws://localhost:8000/ws`) {
+  connect(url = `${API_BASE_URL.replace('http://', 'ws://').replace('https://', 'wss://')}/ws`) {
     try {
       this.ws = new WebSocket(url);
       

@@ -20,7 +20,7 @@ import {
   ZoomIn as ZoomInIcon,
   ZoomOut as ZoomOutIcon,
   CenterFocusStrong as ResetIcon,
-  Pan as PanIcon,
+  PanTool as PanIcon,
   Edit as LabelIcon
 } from '@mui/icons-material';
 
