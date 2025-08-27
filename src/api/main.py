@@ -804,6 +804,327 @@ async def get_screen_states():
     return {"states": SCREEN_STATES}
 
 
+# Dataset generation helper functions
+async def generate_yolo_dataset(training_dir: Path, train_images: list, val_images: list, augment: bool, augment_factor: int):
+    """Generate YOLO format dataset"""
+    # Create directory structure
+    (training_dir / "images" / "train").mkdir(parents=True, exist_ok=True)
+    (training_dir / "images" / "val").mkdir(parents=True, exist_ok=True)
+    (training_dir / "labels" / "train").mkdir(parents=True, exist_ok=True)
+    (training_dir / "labels" / "val").mkdir(parents=True, exist_ok=True)
+    
+    # Object detection classes for YOLO
+    classes = [
+        "button", "tile", "menu", "dialog", "keyboard", "focused_button", "focused_tile",
+        "video_player", "progress_bar", "buffering_spinner", "closed_caption", "subtitle",
+        "rail", "tab_bar", "loading_indicator", "error_message", "notification"
+    ]
+    
+    # Write classes.txt
+    with open(training_dir / "classes.txt", "w") as f:
+        for cls in classes:
+            f.write(f"{cls}\n")
+    
+    # Process train images
+    train_paths = []
+    for i, item in enumerate(train_images):
+        # Copy original image
+        train_img_path = training_dir / "images" / "train" / f"train_{i:04d}.jpg"
+        import shutil
+        shutil.copy2(item["image_file"], train_img_path)
+        train_paths.append(str(train_img_path))
+        
+        # Convert annotations to YOLO format
+        annotation = item["annotation"]
+        yolo_label_path = training_dir / "labels" / "train" / f"train_{i:04d}.txt"
+        
+        with open(yolo_label_path, "w") as f:
+            if annotation.get("bounding_boxes"):
+                for bbox in annotation["bounding_boxes"]:
+                    class_id = classes.index(bbox["class"]) if bbox["class"] in classes else 0
+                    # YOLO format: class_id center_x center_y width height (normalized)
+                    center_x = bbox["x"] + bbox["width"] / 2
+                    center_y = bbox["y"] + bbox["height"] / 2
+                    f.write(f"{class_id} {center_x:.6f} {center_y:.6f} {bbox['width']:.6f} {bbox['height']:.6f}\n")
+        
+        # Generate augmented images if enabled
+        if augment:
+            for aug_idx in range(augment_factor):
+                aug_img_path = training_dir / "images" / "train" / f"train_{i:04d}_aug_{aug_idx}.jpg"
+                aug_label_path = training_dir / "labels" / "train" / f"train_{i:04d}_aug_{aug_idx}.txt"
+                
+                # Simple augmentation (copy for now - can be enhanced with actual image processing)
+                shutil.copy2(train_img_path, aug_img_path)
+                shutil.copy2(yolo_label_path, aug_label_path)
+                train_paths.append(str(aug_img_path))
+    
+    # Process val images
+    val_paths = []
+    for i, item in enumerate(val_images):
+        val_img_path = training_dir / "images" / "val" / f"val_{i:04d}.jpg"
+        shutil.copy2(item["image_file"], val_img_path)
+        val_paths.append(str(val_img_path))
+        
+        annotation = item["annotation"]
+        yolo_label_path = training_dir / "labels" / "val" / f"val_{i:04d}.txt"
+        
+        with open(yolo_label_path, "w") as f:
+            if annotation.get("bounding_boxes"):
+                for bbox in annotation["bounding_boxes"]:
+                    class_id = classes.index(bbox["class"]) if bbox["class"] in classes else 0
+                    center_x = bbox["x"] + bbox["width"] / 2
+                    center_y = bbox["y"] + bbox["height"] / 2
+                    f.write(f"{class_id} {center_x:.6f} {center_y:.6f} {bbox['width']:.6f} {bbox['height']:.6f}\n")
+    
+    # Write train.txt and val.txt
+    with open(training_dir / "train.txt", "w") as f:
+        for path in train_paths:
+            f.write(f"{path}\n")
+    
+    with open(training_dir / "val.txt", "w") as f:
+        for path in val_paths:
+            f.write(f"{path}\n")
+    
+    # Create dataset.yaml for YOLO
+    yaml_content = f"""path: {training_dir.absolute()}
+train: train.txt
+val: val.txt
+
+nc: {len(classes)}
+names: {classes}
+"""
+    with open(training_dir / "dataset.yaml", "w") as f:
+        f.write(yaml_content)
+
+
+async def generate_classification_dataset(training_dir: Path, train_images: list, val_images: list, augment: bool, augment_factor: int):
+    """Generate image classification dataset with folder structure"""
+    # Create base directories
+    (training_dir / "train").mkdir(parents=True, exist_ok=True)
+    (training_dir / "val").mkdir(parents=True, exist_ok=True)
+    
+    # Get all unique classes
+    classes = set()
+    for item in train_images + val_images:
+        annotation = item["annotation"]
+        class_name = annotation.get("class_name", "unknown")
+        classes.add(class_name)
+    
+    # Create class directories
+    for class_name in classes:
+        (training_dir / "train" / class_name).mkdir(parents=True, exist_ok=True)
+        (training_dir / "val" / class_name).mkdir(parents=True, exist_ok=True)
+    
+    # Process train images
+    import shutil
+    for i, item in enumerate(train_images):
+        annotation = item["annotation"]
+        class_name = annotation.get("class_name", "unknown")
+        
+        # Copy original image
+        train_img_path = training_dir / "train" / class_name / f"train_{i:04d}.jpg"
+        shutil.copy2(item["image_file"], train_img_path)
+        
+        # Generate augmented images if enabled
+        if augment:
+            for aug_idx in range(augment_factor):
+                aug_img_path = training_dir / "train" / class_name / f"train_{i:04d}_aug_{aug_idx}.jpg"
+                shutil.copy2(train_img_path, aug_img_path)
+    
+    # Process val images
+    for i, item in enumerate(val_images):
+        annotation = item["annotation"]
+        class_name = annotation.get("class_name", "unknown")
+        
+        val_img_path = training_dir / "val" / class_name / f"val_{i:04d}.jpg"
+        shutil.copy2(item["image_file"], val_img_path)
+
+
+async def generate_llava_dataset(training_dir: Path, train_images: list, val_images: list, augment: bool, augment_factor: int):
+    """Generate LLaVA format dataset"""
+    # Create directories
+    (training_dir / "images").mkdir(parents=True, exist_ok=True)
+    
+    train_data = []
+    val_data = []
+    
+    import shutil
+    
+    # Process train images
+    for i, item in enumerate(train_images):
+        img_name = f"train_{i:04d}.jpg"
+        img_path = training_dir / "images" / img_name
+        shutil.copy2(item["image_file"], img_path)
+        
+        annotation = item["annotation"]
+        
+        # Create conversation format
+        conversation = {
+            "id": f"train_{i:04d}",
+            "image": img_name,
+            "conversations": [
+                {
+                    "from": "human",
+                    "value": f"Describe this TV/STB screen. What is the current state? State: {annotation.get('state', 'unknown')}"
+                },
+                {
+                    "from": "gpt",
+                    "value": f"This is a {annotation.get('state_description', 'screen')}. " + 
+                             f"App: {annotation.get('app_name', 'None')}. " +
+                             f"Notes: {annotation.get('notes', 'No additional notes.')}"
+                }
+            ]
+        }
+        train_data.append(conversation)
+        
+        # Generate augmented data if enabled
+        if augment:
+            for aug_idx in range(augment_factor):
+                aug_img_name = f"train_{i:04d}_aug_{aug_idx}.jpg"
+                aug_img_path = training_dir / "images" / aug_img_name
+                shutil.copy2(img_path, aug_img_path)
+                
+                aug_conversation = conversation.copy()
+                aug_conversation["id"] = f"train_{i:04d}_aug_{aug_idx}"
+                aug_conversation["image"] = aug_img_name
+                train_data.append(aug_conversation)
+    
+    # Process val images
+    for i, item in enumerate(val_images):
+        img_name = f"val_{i:04d}.jpg"
+        img_path = training_dir / "images" / img_name
+        shutil.copy2(item["image_file"], img_path)
+        
+        annotation = item["annotation"]
+        
+        conversation = {
+            "id": f"val_{i:04d}",
+            "image": img_name,
+            "conversations": [
+                {
+                    "from": "human",
+                    "value": f"Describe this TV/STB screen. What is the current state? State: {annotation.get('state', 'unknown')}"
+                },
+                {
+                    "from": "gpt",
+                    "value": f"This is a {annotation.get('state_description', 'screen')}. " + 
+                             f"App: {annotation.get('app_name', 'None')}. " +
+                             f"Notes: {annotation.get('notes', 'No additional notes.')}"
+                }
+            ]
+        }
+        val_data.append(conversation)
+    
+    # Write JSON files
+    with open(training_dir / "train.json", "w") as f:
+        json.dump(train_data, f, indent=2)
+    
+    with open(training_dir / "val.json", "w") as f:
+        json.dump(val_data, f, indent=2)
+
+
+@app.post("/dataset/{dataset_name}/generate-training")
+async def generate_training_dataset(
+    dataset_name: str, 
+    format: str = "yolo",
+    train_split: float = 0.8,
+    augment: bool = True,
+    augment_factor: int = 3
+):
+    """Generate a training dataset with proper format, train/test split, and augmentation"""
+    try:
+        dataset_dir = DATASETS_DIR / dataset_name
+        if not dataset_dir.exists():
+            raise HTTPException(status_code=404, detail="Dataset not found")
+        
+        # Load dataset metadata
+        metadata_file = dataset_dir / "metadata.json"
+        if not metadata_file.exists():
+            raise HTTPException(status_code=404, detail="Dataset metadata not found")
+        
+        with open(metadata_file) as f:
+            metadata = json.load(f)
+        
+        dataset_type = metadata.get("dataset_type", "object_detection")
+        
+        # Get all labeled images
+        images_dir = dataset_dir / "images"
+        annotations_dir = dataset_dir / "annotations"
+        
+        if not images_dir.exists() or not annotations_dir.exists():
+            raise HTTPException(status_code=400, detail="Dataset images or annotations directory not found")
+        
+        labeled_images = []
+        for annotation_file in annotations_dir.glob("*.json"):
+            image_file = images_dir / f"{annotation_file.stem}.jpg"
+            if image_file.exists():
+                with open(annotation_file) as f:
+                    annotation = json.load(f)
+                labeled_images.append({
+                    "image_file": image_file,
+                    "annotation_file": annotation_file,
+                    "annotation": annotation
+                })
+        
+        if len(labeled_images) == 0:
+            raise HTTPException(status_code=400, detail="No labeled images found in dataset")
+        
+        # Create training dataset directory
+        training_dir = TRAINING_DIR / f"{dataset_name}_training_{format}"
+        training_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Split dataset
+        import random
+        random.shuffle(labeled_images)
+        split_idx = int(len(labeled_images) * train_split)
+        train_images = labeled_images[:split_idx]
+        val_images = labeled_images[split_idx:]
+        
+        # Generate dataset based on format
+        if format == "yolo" and dataset_type == "object_detection":
+            await generate_yolo_dataset(training_dir, train_images, val_images, augment, augment_factor)
+        elif format == "folder_structure" and dataset_type == "image_classification":
+            await generate_classification_dataset(training_dir, train_images, val_images, augment, augment_factor)
+        elif format == "llava" and dataset_type == "vision_llm":
+            await generate_llava_dataset(training_dir, train_images, val_images, augment, augment_factor)
+        else:
+            raise HTTPException(status_code=400, detail=f"Format '{format}' not supported for dataset type '{dataset_type}'")
+        
+        # Create ZIP file
+        import zipfile
+        zip_path = training_dir.with_suffix('.zip')
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for root, dirs, files in os.walk(training_dir):
+                for file in files:
+                    file_path = Path(root) / file
+                    arcname = file_path.relative_to(training_dir)
+                    zipf.write(file_path, arcname)
+        
+        # Cleanup unzipped directory
+        import shutil
+        shutil.rmtree(training_dir)
+        
+        log.info(f"Generated training dataset for {dataset_name}: {zip_path}")
+        
+        return {
+            "message": "Training dataset generated successfully",
+            "dataset_name": dataset_name,
+            "format": format,
+            "total_images": len(labeled_images),
+            "train_images": len(train_images),
+            "val_images": len(val_images),
+            "augmentation_enabled": augment,
+            "zip_file": str(zip_path.name),
+            "file_size": zip_path.stat().st_size
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Failed to generate training dataset: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate training dataset: {str(e)}")
+
+
 # Training management endpoints
 TRAINING_DIR = Path("training")
 TRAINING_DIR.mkdir(exist_ok=True)

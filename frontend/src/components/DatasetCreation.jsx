@@ -27,6 +27,7 @@ import {
   Alert,
   LinearProgress,
   Divider,
+  CircularProgress,
 } from '@mui/material';
 import {
   PhotoCamera as CameraIcon,
@@ -165,6 +166,8 @@ const DatasetCreation = ({ onNotification }) => {
   // Local state for UI-only elements
   const [isCreatingDataset, setIsCreatingDataset] = useState(false);
   const [showDatasetTypeSelector, setShowDatasetTypeSelector] = useState(false);
+  const [isLockingDevice, setIsLockingDevice] = useState(false);
+  const [isGeneratingDataset, setIsGeneratingDataset] = useState(false);
 
   // Labeling state
   const [selectedImage, setSelectedImage] = useState(null);
@@ -441,6 +444,7 @@ const DatasetCreation = ({ onNotification }) => {
   };
 
   const handleDeviceLock = async () => {
+    setIsLockingDevice(true);
     try {
       if (deviceLocked) {
         await deviceAPI.unlockDevice();
@@ -483,6 +487,8 @@ const DatasetCreation = ({ onNotification }) => {
         title: 'Device Lock Failed',
         message: errorMessage
       });
+    } finally {
+      setIsLockingDevice(false);
     }
   };
 
@@ -925,36 +931,66 @@ const DatasetCreation = ({ onNotification }) => {
     }
   };
 
-  const exportDataset = async () => {
-    if (!currentDataset || capturedImages.length === 0) {
+  const generateTrainingDataset = async () => {
+    if (!currentDataset) {
       onNotification({
         type: 'warning',
-        title: 'No Data to Export',
-        message: 'Please capture and label some images first'
+        title: 'No Dataset Selected',
+        message: 'Please select a dataset first'
       });
       return;
     }
-    
-    // Create JSON export
-    const exportData = {
-      dataset: currentDataset,
-      images: capturedImages.filter(img => img.labels),
-      created_at: new Date().toISOString()
-    };
-    
-    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${currentDataset.name}_export_${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    
-    onNotification({
-      type: 'success',
-      title: 'Dataset Exported',
-      message: 'Training data exported successfully'
-    });
+
+    const labeledCount = capturedImages.filter(img => img.labels).length;
+    if (labeledCount === 0) {
+      onNotification({
+        type: 'warning',
+        title: 'No Labeled Images',
+        message: 'Please label some images before generating training dataset'
+      });
+      return;
+    }
+
+    setIsGeneratingDataset(true);
+    try {
+      // Determine format based on dataset type
+      let format = 'yolo';
+      if (config.datasetType === DATASET_TYPES.IMAGE_CLASSIFICATION) {
+        format = 'folder_structure';
+      } else if (config.datasetType === DATASET_TYPES.VISION_LLM) {
+        format = 'llava';
+      }
+
+      onNotification({
+        type: 'info',
+        title: 'Generating Training Dataset',
+        message: `Creating ${format.toUpperCase()} format dataset with augmentation...`
+      });
+
+      const response = await datasetAPI.generateTrainingDataset(
+        currentDataset.name,
+        format,
+        0.8, // 80% train, 20% validation
+        true, // Enable augmentation
+        3 // 3x augmentation factor
+      );
+
+      onNotification({
+        type: 'success',
+        title: 'Training Dataset Generated',
+        message: `${response.data.zip_file} created with ${response.data.train_images} training and ${response.data.val_images} validation images`
+      });
+
+    } catch (error) {
+      console.error('Failed to generate training dataset:', error);
+      onNotification({
+        type: 'error',
+        title: 'Generation Failed',
+        message: error.response?.data?.detail || 'Failed to generate training dataset'
+      });
+    } finally {
+      setIsGeneratingDataset(false);
+    }
   };
 
   const steps = [
@@ -1134,13 +1170,13 @@ const DatasetCreation = ({ onNotification }) => {
                 <Button
                   variant={deviceLocked ? "contained" : "outlined"}
                   fullWidth
-                  startIcon={deviceLocked ? <LockIcon /> : <UnlockIcon />}
+                  startIcon={isLockingDevice ? <CircularProgress size={16} color="inherit" /> : (deviceLocked ? <LockIcon /> : <UnlockIcon />)}
                   onClick={handleDeviceLock}
-                  disabled={!isInitialized}
+                  disabled={!isInitialized || isLockingDevice}
                   color={deviceLocked ? "primary" : "inherit"}
                   sx={{ mb: 2 }}
                 >
-                  {deviceLocked ? 'Device Locked' : 'Lock Device'}
+                  {isLockingDevice ? 'Processing...' : (deviceLocked ? 'Device Locked' : 'Lock Device')}
                 </Button>
 
                 <Box sx={{ display: 'flex', gap: 1 }}>
@@ -1381,12 +1417,13 @@ const DatasetCreation = ({ onNotification }) => {
                   <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
                     <Button
                       variant="contained"
-                      startIcon={<DownloadIcon />}
-                      onClick={exportDataset}
+                      startIcon={isGeneratingDataset ? <CircularProgress size={16} color="inherit" /> : <DownloadIcon />}
+                      onClick={generateTrainingDataset}
+                      disabled={isGeneratingDataset}
                       size="small"
                       color="primary"
                     >
-                      Export Training Data
+                      {isGeneratingDataset ? 'Generating...' : 'Generate Training Dataset'}
                     </Button>
                     <Chip
                       label={`${capturedImages.filter(img => img.labels).length} labeled`}

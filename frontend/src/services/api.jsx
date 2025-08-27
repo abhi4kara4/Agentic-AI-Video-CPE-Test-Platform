@@ -111,6 +111,13 @@ export const datasetAPI = {
       notes,
       label_data: labelData // Extended data for different model types
     }),
+  generateTrainingDataset: (datasetName, format = 'yolo', trainSplit = 0.8, augment = true, augmentFactor = 3) =>
+    apiClient.post(`/dataset/${datasetName}/generate-training`, { 
+      format,
+      train_split: trainSplit,
+      augment,
+      augment_factor: augmentFactor
+    }),
   exportDataset: (datasetId, format = 'llava') => 
     apiClient.post(`/dataset/${datasetId}/export`, { format }),
   importDataset: (file, format = 'llava') => {
