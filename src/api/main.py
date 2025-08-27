@@ -721,24 +721,24 @@ async def label_image(dataset_name: str, request: LabelImageRequest):
                 "state": request.screen_type,
                 "state_description": SCREEN_STATES.get(request.screen_type)
             })
-    
-    # Save annotation
-    annotation_file = dataset_dir / "annotations" / f"{Path(request.image_name).stem}.json"
-    annotation_file.parent.mkdir(exist_ok=True)
-    
-    with open(annotation_file, "w") as f:
-        json.dump(annotation, f, indent=2)
-    
-    # Broadcast image labeling
-    try:
-        if manager.active_connections:
-            await broadcast_update("image_labeled", {
-                "dataset_name": dataset_name,
-                "annotation": annotation
-            })
-    except Exception as broadcast_error:
-        log.warning(f"Failed to broadcast image labeling: {broadcast_error}")
-    
+        
+        # Save annotation
+        annotation_file = dataset_dir / "annotations" / f"{Path(request.image_name).stem}.json"
+        annotation_file.parent.mkdir(exist_ok=True)
+        
+        with open(annotation_file, "w") as f:
+            json.dump(annotation, f, indent=2)
+        
+        # Broadcast image labeling
+        try:
+            if manager.active_connections:
+                await broadcast_update("image_labeled", {
+                    "dataset_name": dataset_name,
+                    "annotation": annotation
+                })
+        except Exception as broadcast_error:
+            log.warning(f"Failed to broadcast image labeling: {broadcast_error}")
+        
         log.info(f"Image {request.image_name} labeled successfully in dataset {dataset_name}")
         return annotation
         
