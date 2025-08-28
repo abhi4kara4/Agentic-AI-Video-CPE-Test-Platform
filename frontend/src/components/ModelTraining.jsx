@@ -46,7 +46,7 @@ import {
   Settings as ConfigIcon,
   Assessment as TestIcon,
 } from '@mui/icons-material';
-import { trainingAPI, datasetAPI } from '../services/api.jsx';
+import { trainingAPI, datasetAPI, wsManager } from '../services/api.jsx';
 import { DATASET_TYPES, DATASET_TYPE_INFO } from '../constants/datasetTypes.js';
 
 const ModelTraining = ({ onNotification }) => {
@@ -74,7 +74,58 @@ const ModelTraining = ({ onNotification }) => {
     loadDatasets();
     loadTrainingJobs();
     loadModels();
-  }, []);
+
+    // Set up WebSocket listeners for training updates
+    const handleTrainingStarted = (data) => {
+      console.log('Training started:', data);
+      loadTrainingJobs();
+      onNotification({
+        type: 'info',
+        title: 'Training Started',
+        message: `Training started for ${data.model_name}`
+      });
+    };
+
+    const handleTrainingProgress = (data) => {
+      console.log('Training progress:', data);
+      loadTrainingJobs(); // Refresh job list to show progress
+    };
+
+    const handleTrainingCompleted = (data) => {
+      console.log('Training completed:', data);
+      loadTrainingJobs();
+      loadModels();
+      onNotification({
+        type: 'success',
+        title: 'Training Completed',
+        message: `Model ${data.model_name} training completed successfully!`
+      });
+    };
+
+    const handleTrainingFailed = (data) => {
+      console.log('Training failed:', data);
+      loadTrainingJobs();
+      onNotification({
+        type: 'error',
+        title: 'Training Failed',
+        message: `Training failed: ${data.error}`
+      });
+    };
+
+    // Add event listeners
+    wsManager.on('training_started', handleTrainingStarted);
+    wsManager.on('training_progress', handleTrainingProgress);
+    wsManager.on('training_completed', handleTrainingCompleted);
+    wsManager.on('training_failed', handleTrainingFailed);
+
+    // Cleanup on unmount
+    return () => {
+      wsManager.off('training_started', handleTrainingStarted);
+      wsManager.off('training_progress', handleTrainingProgress);
+      wsManager.off('training_completed', handleTrainingCompleted);
+      wsManager.off('training_failed', handleTrainingFailed);
+    };
+  }, [onNotification]);
 
   const loadDatasets = async () => {
     try {
