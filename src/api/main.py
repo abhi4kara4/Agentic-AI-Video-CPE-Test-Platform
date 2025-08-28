@@ -1061,35 +1061,69 @@ async def generate_training_dataset(
         
         # Debug logging
         annotation_files = list(annotations_dir.glob("*.json"))
-        log.info(f"Found {len(annotation_files)} annotation files in {annotations_dir}")
+        image_files = list(images_dir.glob("*.*"))
         
+        log.info(f"Found {len(annotation_files)} annotation files in {annotations_dir}")
+        log.info(f"Found {len(image_files)} image files in {images_dir}")
+        log.info(f"Image files: {[f.name for f in image_files[:10]]}...")  # Show first 10
+        log.info(f"Annotation files: {[f.stem for f in annotation_files[:10]]}...")  # Show first 10
+        
+        # First, try to match annotations with their corresponding images
         for annotation_file in annotation_files:
-            # Try different image extensions
-            image_extensions = ['.jpg', '.jpeg', '.png']
             image_file = None
             
-            for ext in image_extensions:
-                potential_image = images_dir / f"{annotation_file.stem}{ext}"
-                if potential_image.exists():
-                    image_file = potential_image
-                    break
-            
-            if image_file and image_file.exists():
-                try:
-                    with open(annotation_file) as f:
-                        annotation = json.load(f)
+            # Try to find the corresponding image by checking the annotation content
+            try:
+                with open(annotation_file) as f:
+                    annotation = json.load(f)
+                
+                # Check if annotation has image_filename field
+                image_filename = annotation.get("image_filename")
+                if image_filename:
+                    # Try exact filename match
+                    potential_image = images_dir / image_filename
+                    if potential_image.exists():
+                        image_file = potential_image
+                    else:
+                        # Try without extension and add common extensions
+                        base_name = Path(image_filename).stem
+                        for ext in ['.jpg', '.jpeg', '.png']:
+                            potential_image = images_dir / f"{base_name}{ext}"
+                            if potential_image.exists():
+                                image_file = potential_image
+                                break
+                
+                # If still no match, try annotation filename based matching
+                if not image_file:
+                    for ext in ['.jpg', '.jpeg', '.png']:
+                        potential_image = images_dir / f"{annotation_file.stem}{ext}"
+                        if potential_image.exists():
+                            image_file = potential_image
+                            break
+                
+                # If still no match, try timestamp-based matching for legacy screenshots
+                if not image_file and annotation_file.stem.startswith("screenshot_"):
+                    timestamp = annotation_file.stem.replace("screenshot_", "")
+                    # Try to find image files with similar timestamps
+                    for img_file in image_files:
+                        if timestamp in img_file.stem or any(ts in img_file.stem for ts in [timestamp[-6:], timestamp[-8:]]):
+                            image_file = img_file
+                            break
+                
+                if image_file and image_file.exists():
                     labeled_images.append({
                         "image_file": image_file,
                         "annotation_file": annotation_file,
                         "annotation": annotation
                     })
-                    log.info(f"Added labeled image: {image_file.name} -> {annotation_file.name}")
-                except Exception as e:
-                    log.warning(f"Failed to load annotation {annotation_file}: {e}")
-            else:
-                log.warning(f"No matching image found for annotation {annotation_file.stem}")
+                    log.info(f"Matched: {image_file.name} <-> {annotation_file.name}")
+                else:
+                    log.warning(f"No matching image found for annotation {annotation_file.stem}")
+                    
+            except Exception as e:
+                log.warning(f"Failed to process annotation {annotation_file}: {e}")
         
-        log.info(f"Total labeled images found: {len(labeled_images)}")
+        log.info(f"Total labeled images matched: {len(labeled_images)}")
         
         if len(labeled_images) == 0:
             raise HTTPException(status_code=400, detail="No labeled images found in dataset")
