@@ -178,6 +178,15 @@ const ModelTesting = ({ onNotification }) => {
       return;
     }
 
+    if (inputType === 'upload' && uploadedImages.length === 0) {
+      onNotification({
+        type: 'warning',
+        title: 'No Images Uploaded',
+        message: 'Please upload at least one image to test'
+      });
+      return;
+    }
+
     setLoading(true);
     try {
       let testData = null;
@@ -187,8 +196,14 @@ const ModelTesting = ({ onNotification }) => {
         const response = await testingAPI.testModel(selectedModel);
         testData = response.data;
       } else if (inputType === 'upload' && uploadedImages.length > 0) {
-        // Test with uploaded images
-        // For now, test with first image (can be extended for batch processing)
+        // Test with first uploaded image
+        const response = await testingAPI.testModelWithUpload(
+          selectedModel, 
+          uploadedImages[0].file
+        );
+        testData = response.data;
+      } else if (inputType === 'video' && uploadedVideo) {
+        // For video, use stream endpoint (could be extended to process video frames)
         const response = await testingAPI.testModel(selectedModel);
         testData = response.data;
       }
@@ -233,26 +248,50 @@ const ModelTesting = ({ onNotification }) => {
       return;
     }
 
+    if (inputType === 'upload' && uploadedImages.length === 0) {
+      onNotification({
+        type: 'warning',
+        title: 'No Images Uploaded',
+        message: 'Please upload at least one image to test'
+      });
+      return;
+    }
+
     setLoading(true);
     try {
-      const response = await testingAPI.testModel(selectedModel);
-      const testData = response.data;
+      let testData = null;
       
-      setTestResults(prev => [{
-        id: Date.now(),
-        modelName: selectedModel,
-        modelType: 'image_classification',
-        inputType,
-        timestamp: new Date(),
-        results: testData,
-        settings: classificationSettings
-      }, ...prev]);
+      if (inputType === 'stream') {
+        const response = await testingAPI.testModel(selectedModel);
+        testData = response.data;
+      } else if (inputType === 'upload' && uploadedImages.length > 0) {
+        const response = await testingAPI.testModelWithUpload(
+          selectedModel, 
+          uploadedImages[0].file
+        );
+        testData = response.data;
+      } else if (inputType === 'video' && uploadedVideo) {
+        const response = await testingAPI.testModel(selectedModel);
+        testData = response.data;
+      }
       
-      onNotification({
-        type: 'success',
-        title: 'Classification Complete',
-        message: `Top prediction: ${testData.predictions?.[0]?.label || 'Unknown'}`
-      });
+      if (testData) {
+        setTestResults(prev => [{
+          id: Date.now(),
+          modelName: selectedModel,
+          modelType: 'image_classification',
+          inputType,
+          timestamp: new Date(),
+          results: testData,
+          settings: classificationSettings
+        }, ...prev]);
+        
+        onNotification({
+          type: 'success',
+          title: 'Classification Complete',
+          message: `Top prediction: ${testData.predictions?.[0]?.label || testData.top_prediction?.label || 'Unknown'}`
+        });
+      }
       
       await loadTestHistory();
     } catch (error) {
@@ -276,26 +315,51 @@ const ModelTesting = ({ onNotification }) => {
       return;
     }
 
+    if (inputType === 'upload' && uploadedImages.length === 0) {
+      onNotification({
+        type: 'warning',
+        title: 'No Images Uploaded',
+        message: 'Please upload at least one image to test'
+      });
+      return;
+    }
+
     setLoading(true);
     try {
-      const response = await testingAPI.testModel(selectedModel, visionLLMSettings.prompt);
-      const testData = response.data;
+      let testData = null;
       
-      setTestResults(prev => [{
-        id: Date.now(),
-        modelName: selectedModel,
-        modelType: 'vision_llm',
-        inputType,
-        timestamp: new Date(),
-        results: testData,
-        settings: visionLLMSettings
-      }, ...prev]);
+      if (inputType === 'stream') {
+        const response = await testingAPI.testModel(selectedModel, visionLLMSettings.prompt);
+        testData = response.data;
+      } else if (inputType === 'upload' && uploadedImages.length > 0) {
+        const response = await testingAPI.testModelWithUpload(
+          selectedModel, 
+          uploadedImages[0].file,
+          visionLLMSettings.prompt
+        );
+        testData = response.data;
+      } else if (inputType === 'video' && uploadedVideo) {
+        const response = await testingAPI.testModel(selectedModel, visionLLMSettings.prompt);
+        testData = response.data;
+      }
       
-      onNotification({
-        type: 'success',
-        title: 'Vision LLM Analysis Complete',
-        message: 'Generated response successfully'
-      });
+      if (testData) {
+        setTestResults(prev => [{
+          id: Date.now(),
+          modelName: selectedModel,
+          modelType: 'vision_llm',
+          inputType,
+          timestamp: new Date(),
+          results: testData,
+          settings: visionLLMSettings
+        }, ...prev]);
+        
+        onNotification({
+          type: 'success',
+          title: 'Vision LLM Analysis Complete',
+          message: 'Generated response successfully'
+        });
+      }
       
       await loadTestHistory();
     } catch (error) {

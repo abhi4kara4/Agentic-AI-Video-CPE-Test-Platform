@@ -165,6 +165,14 @@ export const trainingAPI = {
 export const testingAPI = {
   testModel: (modelName, prompt = "Describe what you see on this TV screen") => 
     apiClient.post(`/test/models/${modelName}/analyze`, { prompt }),
+  testModelWithUpload: (modelName, imageFile, prompt = "Describe what you see on this TV screen") => {
+    const formData = new FormData();
+    formData.append('file', imageFile);
+    formData.append('prompt', prompt);
+    return apiClient.post(`/test/models/${modelName}/analyze-upload`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+  },
   benchmarkModel: (modelName, iterations = 5, prompt = "Describe what you see on this TV screen") => 
     apiClient.post(`/test/benchmark/${modelName}`, { 
       iterations,

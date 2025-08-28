@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, WebSocket, WebSocketDisconnect, Form
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -1885,12 +1885,26 @@ async def compare_models(models: List[str], prompt: str = "Describe what you see
 
 @app.post("/test/models/{model_name}/analyze")
 async def test_single_model(model_name: str, prompt: str = "Describe what you see on this TV screen"):
-    """Test a single model on current frame"""
+    """Test a trained model on current frame"""
     if not orchestrator:
         raise HTTPException(status_code=503, detail="Service not initialized")
     
-    if model_name not in AVAILABLE_MODELS:
-        raise HTTPException(status_code=400, detail=f"Invalid model. Available: {list(AVAILABLE_MODELS.keys())}")
+    # Look for the model in trained models first
+    models_dir = TRAINING_DIR / "models"
+    model_dir = models_dir / model_name
+    model_metadata = None
+    model_type = "vision_llm"  # default fallback
+    
+    if model_dir.exists():
+        metadata_file = model_dir / "metadata.json"
+        if metadata_file.exists():
+            with open(metadata_file) as f:
+                model_metadata = json.load(f)
+                model_type = model_metadata.get("dataset_type", "vision_llm")
+    else:
+        # Check if it's a pre-built model
+        if model_name not in AVAILABLE_MODELS:
+            raise HTTPException(status_code=404, detail=f"Model {model_name} not found. Train a model first or use available models: {list(AVAILABLE_MODELS.keys())}")
     
     frame = orchestrator.video_capture.get_frame()
     if frame is None:
@@ -1906,27 +1920,194 @@ async def test_single_model(model_name: str, prompt: str = "Describe what you se
     
     start_time = datetime.now()
     
-    # Simulate model inference (placeholder)
-    await asyncio.sleep(3)  # Simulate processing time
+    # Simulate model inference based on model type
+    if model_type == "object_detection":
+        await asyncio.sleep(1.5)  # Object detection is typically faster
+        end_time = datetime.now()
+        processing_time = (end_time - start_time).total_seconds()
+        
+        # Simulated object detection results
+        detections = [
+            {"class": "remote_control", "confidence": 0.89, "bbox": [120, 200, 80, 40]},
+            {"class": "tv_screen", "confidence": 0.95, "bbox": [50, 50, 300, 200]},
+            {"class": "menu_button", "confidence": 0.76, "bbox": [180, 150, 60, 25]}
+        ]
+        
+        result = {
+            "test_id": test_id,
+            "model": model_name,
+            "model_type": model_type,
+            "frame_path": str(frame_path),
+            "detections": detections,
+            "detection_count": len(detections),
+            "processing_time_seconds": processing_time,
+            "timestamp": end_time.isoformat()
+        }
+        
+    elif model_type == "image_classification":
+        await asyncio.sleep(1.0)  # Classification is fast
+        end_time = datetime.now()
+        processing_time = (end_time - start_time).total_seconds()
+        
+        # Simulated classification results
+        predictions = [
+            {"label": "home_screen", "confidence": 0.92},
+            {"label": "app_rail", "confidence": 0.87},
+            {"label": "settings_menu", "confidence": 0.73},
+            {"label": "video_player", "confidence": 0.45},
+            {"label": "error_screen", "confidence": 0.12}
+        ]
+        
+        result = {
+            "test_id": test_id,
+            "model": model_name,
+            "model_type": model_type,
+            "frame_path": str(frame_path),
+            "predictions": predictions,
+            "top_prediction": predictions[0],
+            "processing_time_seconds": processing_time,
+            "timestamp": end_time.isoformat()
+        }
+        
+    else:  # vision_llm or fallback
+        await asyncio.sleep(3)  # LLM analysis takes longer
+        end_time = datetime.now()
+        processing_time = (end_time - start_time).total_seconds()
+        
+        # Simulated LLM response
+        response = f"This TV screen shows a home interface with several app icons visible in a horizontal rail. I can see navigation elements including what appears to be Netflix, YouTube, and other streaming apps. The screen has a dark theme with colorful app thumbnails. There's a selected/highlighted app in the center of the rail, and the overall layout suggests this is a modern smart TV or set-top box interface."
+        confidence = 0.85
+        
+        result = {
+            "test_id": test_id,
+            "model": model_name,
+            "model_type": model_type,
+            "frame_path": str(frame_path),
+            "prompt": prompt,
+            "response": response,
+            "confidence": confidence,
+            "processing_time_seconds": processing_time,
+            "timestamp": end_time.isoformat()
+        }
     
-    end_time = datetime.now()
-    processing_time = (end_time - start_time).total_seconds()
+    with open(test_dir / "result.json", "w") as f:
+        json.dump(result, f, indent=2)
     
-    # Simulated response
-    response = f"Analysis from {model_name}: This appears to be a TV interface with navigation elements visible."
-    confidence = 0.85  # Simulated confidence
+    return result
+
+
+@app.post("/test/models/{model_name}/analyze-upload")
+async def test_model_with_upload(
+    model_name: str,
+    file: UploadFile = File(...),
+    prompt: str = Form("Describe what you see on this TV screen")
+):
+    """Test a trained model with uploaded image"""
+    # Look for the model in trained models first
+    models_dir = TRAINING_DIR / "models"
+    model_dir = models_dir / model_name
+    model_metadata = None
+    model_type = "vision_llm"  # default fallback
     
-    result = {
-        "test_id": test_id,
-        "model": model_name,
-        "model_info": AVAILABLE_MODELS[model_name],
-        "frame_path": str(frame_path),
-        "prompt": prompt,
-        "response": response,
-        "confidence": confidence,
-        "processing_time_seconds": processing_time,
-        "timestamp": end_time.isoformat()
-    }
+    if model_dir.exists():
+        metadata_file = model_dir / "metadata.json"
+        if metadata_file.exists():
+            with open(metadata_file) as f:
+                model_metadata = json.load(f)
+                model_type = model_metadata.get("dataset_type", "vision_llm")
+    else:
+        # Check if it's a pre-built model
+        if model_name not in AVAILABLE_MODELS:
+            raise HTTPException(status_code=404, detail=f"Model {model_name} not found")
+    
+    # Validate file type
+    if not file.content_type.startswith('image/'):
+        raise HTTPException(status_code=400, detail="File must be an image")
+    
+    test_id = str(uuid.uuid4())
+    test_dir = TESTING_DIR / f"upload_test_{test_id}"
+    test_dir.mkdir(parents=True)
+    
+    # Save uploaded image
+    image_path = test_dir / f"uploaded_{file.filename}"
+    with open(image_path, "wb") as f:
+        content = await file.read()
+        f.write(content)
+    
+    start_time = datetime.now()
+    
+    # Simulate model inference based on model type
+    if model_type == "object_detection":
+        await asyncio.sleep(1.5)
+        end_time = datetime.now()
+        processing_time = (end_time - start_time).total_seconds()
+        
+        # Simulated object detection results
+        detections = [
+            {"class": "remote_control", "confidence": 0.91, "bbox": [140, 180, 75, 35]},
+            {"class": "tv_interface", "confidence": 0.93, "bbox": [60, 40, 280, 180]},
+            {"class": "button", "confidence": 0.78, "bbox": [200, 140, 50, 20]}
+        ]
+        
+        result = {
+            "test_id": test_id,
+            "model": model_name,
+            "model_type": model_type,
+            "image_path": str(image_path),
+            "input_type": "uploaded_image",
+            "detections": detections,
+            "detection_count": len(detections),
+            "processing_time_seconds": processing_time,
+            "timestamp": end_time.isoformat()
+        }
+        
+    elif model_type == "image_classification":
+        await asyncio.sleep(1.0)
+        end_time = datetime.now()
+        processing_time = (end_time - start_time).total_seconds()
+        
+        # Simulated classification results
+        predictions = [
+            {"label": "app_selection", "confidence": 0.89},
+            {"label": "home_screen", "confidence": 0.84},
+            {"label": "video_player", "confidence": 0.67},
+            {"label": "settings_menu", "confidence": 0.43},
+            {"label": "login_screen", "confidence": 0.21}
+        ]
+        
+        result = {
+            "test_id": test_id,
+            "model": model_name,
+            "model_type": model_type,
+            "image_path": str(image_path),
+            "input_type": "uploaded_image",
+            "predictions": predictions,
+            "top_prediction": predictions[0],
+            "processing_time_seconds": processing_time,
+            "timestamp": end_time.isoformat()
+        }
+        
+    else:  # vision_llm
+        await asyncio.sleep(3)
+        end_time = datetime.now()
+        processing_time = (end_time - start_time).total_seconds()
+        
+        # Simulated LLM response
+        response = f"This uploaded image shows a TV/STB interface. Based on the visual elements, I can see what appears to be an app launcher or home screen with various streaming service icons arranged in a grid or rail format. The interface has a modern design with vibrant app thumbnails against a dark background. Navigation elements and selection indicators are visible, suggesting this is an interactive smart TV or set-top box interface."
+        confidence = 0.87
+        
+        result = {
+            "test_id": test_id,
+            "model": model_name,
+            "model_type": model_type,
+            "image_path": str(image_path),
+            "input_type": "uploaded_image",
+            "prompt": prompt,
+            "response": response,
+            "confidence": confidence,
+            "processing_time_seconds": processing_time,
+            "timestamp": end_time.isoformat()
+        }
     
     with open(test_dir / "result.json", "w") as f:
         json.dump(result, f, indent=2)
