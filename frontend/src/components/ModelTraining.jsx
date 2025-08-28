@@ -47,7 +47,7 @@ import {
   Settings as ConfigIcon,
   Assessment as TestIcon,
 } from '@mui/icons-material';
-import { trainingAPI, datasetAPI, testingAPI, wsManager } from '../services/api.jsx';
+import { trainingAPI, datasetAPI, wsManager } from '../services/api.jsx';
 import { DATASET_TYPES, DATASET_TYPE_INFO } from '../constants/datasetTypes.js';
 
 const ModelTraining = ({ onNotification }) => {
@@ -69,26 +69,12 @@ const ModelTraining = ({ onNotification }) => {
   });
   const [startTrainingDialog, setStartTrainingDialog] = useState(false);
   const [isStartingTraining, setIsStartingTraining] = useState(false);
-  
-  // Testing state
-  const [testHistory, setTestHistory] = useState([]);
-  const [selectedModel, setSelectedModel] = useState('');
-  const [testPrompt, setTestPrompt] = useState('Describe what you see on this TV screen');
-  const [isTesting, setIsTesting] = useState(false);
-  const [testResult, setTestResult] = useState(null);
-  const [benchmarkConfig, setBenchmarkConfig] = useState({
-    iterations: 5,
-    prompt: 'Describe what you see on this TV screen'
-  });
-  const [compareModels, setCompareModels] = useState([]);
-  const [comparisonResult, setComparisonResult] = useState(null);
 
   // Load data on component mount
   useEffect(() => {
     loadDatasets();
     loadTrainingJobs();
     loadModels();
-    loadTestHistory();
 
     // Set up WebSocket listeners for training updates
     const handleTrainingStarted = (data) => {
@@ -181,14 +167,6 @@ const ModelTraining = ({ onNotification }) => {
     }
   };
 
-  const loadTestHistory = async () => {
-    try {
-      const response = await testingAPI.getTestHistory();
-      setTestHistory(response.data?.tests || []);
-    } catch (error) {
-      console.error('Failed to load test history:', error);
-    }
-  };
 
   const handleStartTraining = async () => {
     if (!selectedDataset || !trainingConfig.modelName) {
@@ -336,127 +314,6 @@ const ModelTraining = ({ onNotification }) => {
     }
   };
 
-  // Testing handlers
-  const handleSingleModelTest = async () => {
-    if (!selectedModel) {
-      onNotification({
-        type: 'warning',
-        title: 'No Model Selected',
-        message: 'Please select a model to test'
-      });
-      return;
-    }
-
-    setIsTesting(true);
-    try {
-      const response = await testingAPI.testModel(selectedModel, testPrompt);
-      setTestResult(response.data);
-      await loadTestHistory();
-      
-      onNotification({
-        type: 'success',
-        title: 'Test Completed',
-        message: `Model ${selectedModel} analysis completed`
-      });
-    } catch (error) {
-      onNotification({
-        type: 'error',
-        title: 'Test Failed',
-        message: error.response?.data?.detail || 'Failed to test model'
-      });
-    } finally {
-      setIsTesting(false);
-    }
-  };
-
-  const handleBenchmarkTest = async () => {
-    if (!selectedModel) {
-      onNotification({
-        type: 'warning',
-        title: 'No Model Selected',
-        message: 'Please select a model to benchmark'
-      });
-      return;
-    }
-
-    setIsTesting(true);
-    try {
-      const response = await testingAPI.benchmarkModel(
-        selectedModel, 
-        benchmarkConfig.iterations, 
-        benchmarkConfig.prompt
-      );
-      setTestResult(response.data);
-      await loadTestHistory();
-      
-      onNotification({
-        type: 'success',
-        title: 'Benchmark Completed',
-        message: `Model ${selectedModel} benchmark completed with ${benchmarkConfig.iterations} iterations`
-      });
-    } catch (error) {
-      onNotification({
-        type: 'error',
-        title: 'Benchmark Failed',
-        message: error.response?.data?.detail || 'Failed to benchmark model'
-      });
-    } finally {
-      setIsTesting(false);
-    }
-  };
-
-  const handleCompareModels = async () => {
-    if (compareModels.length < 2) {
-      onNotification({
-        type: 'warning',
-        title: 'Insufficient Models',
-        message: 'Please select at least 2 models to compare'
-      });
-      return;
-    }
-
-    setIsTesting(true);
-    try {
-      const response = await testingAPI.compareModels(compareModels, testPrompt);
-      setComparisonResult(response.data);
-      await loadTestHistory();
-      
-      onNotification({
-        type: 'success',
-        title: 'Comparison Completed',
-        message: `Compared ${compareModels.length} models successfully`
-      });
-    } catch (error) {
-      onNotification({
-        type: 'error',
-        title: 'Comparison Failed',
-        message: error.response?.data?.detail || 'Failed to compare models'
-      });
-    } finally {
-      setIsTesting(false);
-    }
-  };
-
-  const handleClearTestHistory = async () => {
-    try {
-      await testingAPI.clearTestHistory();
-      setTestHistory([]);
-      setTestResult(null);
-      setComparisonResult(null);
-      
-      onNotification({
-        type: 'info',
-        title: 'History Cleared',
-        message: 'Test history has been cleared'
-      });
-    } catch (error) {
-      onNotification({
-        type: 'error',
-        title: 'Clear Failed',
-        message: 'Failed to clear test history'
-      });
-    }
-  };
 
   return (
     <Box sx={{ p: 3 }}>
@@ -473,7 +330,6 @@ const ModelTraining = ({ onNotification }) => {
         <Tab label="Start Training" icon={<StartIcon />} />
         <Tab label="Training Jobs" icon={<TrainingIcon />} />
         <Tab label="Trained Models" icon={<ConfigIcon />} />
-        <Tab label="Model Testing" icon={<TestIcon />} />
       </Tabs>
 
       {/* Start Training Tab */}
@@ -773,245 +629,6 @@ const ModelTraining = ({ onNotification }) => {
         </Card>
       )}
 
-      {/* Model Testing Tab */}
-      {activeTab === 3 && (
-        <Grid container spacing={3}>
-          {/* Testing Controls */}
-          <Grid item xs={12} md={4}>
-            <Card>
-              <CardContent>
-                <Typography variant="h6" gutterBottom>
-                  <TestIcon sx={{ mr: 1, verticalAlign: 'bottom' }} />
-                  Model Testing
-                </Typography>
-                
-                <FormControl fullWidth margin="normal">
-                  <InputLabel>Select Model</InputLabel>
-                  <Select
-                    value={selectedModel}
-                    onChange={(e) => setSelectedModel(e.target.value)}
-                  >
-                    {models.map((model) => (
-                      <MenuItem key={model.name} value={model.name}>
-                        {model.name} ({model.type})
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-
-                <TextField
-                  fullWidth
-                  label="Test Prompt"
-                  value={testPrompt}
-                  onChange={(e) => setTestPrompt(e.target.value)}
-                  margin="normal"
-                  multiline
-                  rows={2}
-                  placeholder="Describe what you see on this TV screen"
-                />
-
-                <Button
-                  variant="contained"
-                  onClick={handleSingleModelTest}
-                  disabled={isTesting || !selectedModel}
-                  fullWidth
-                  sx={{ mt: 2, mb: 1 }}
-                  startIcon={isTesting ? <CircularProgress size={16} /> : <TestIcon />}
-                >
-                  {isTesting ? 'Testing...' : 'Run Single Test'}
-                </Button>
-
-                <Button
-                  variant="outlined"
-                  onClick={handleBenchmarkTest}
-                  disabled={isTesting || !selectedModel}
-                  fullWidth
-                  sx={{ mb: 1 }}
-                  startIcon={<MetricsIcon />}
-                >
-                  Run Benchmark
-                </Button>
-
-                <Accordion sx={{ mt: 2 }}>
-                  <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                    <Typography>Benchmark Config</Typography>
-                  </AccordionSummary>
-                  <AccordionDetails>
-                    <TextField
-                      fullWidth
-                      label="Iterations"
-                      type="number"
-                      value={benchmarkConfig.iterations}
-                      onChange={(e) => setBenchmarkConfig({
-                        ...benchmarkConfig,
-                        iterations: parseInt(e.target.value) || 5
-                      })}
-                      margin="normal"
-                      inputProps={{ min: 1, max: 20 }}
-                    />
-                  </AccordionDetails>
-                </Accordion>
-              </CardContent>
-            </Card>
-          </Grid>
-
-          {/* Test Results */}
-          <Grid item xs={12} md={8}>
-            <Card>
-              <CardContent>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                  <Typography variant="h6">Test Results</Typography>
-                  <Button
-                    onClick={handleClearTestHistory}
-                    color="warning"
-                    size="small"
-                    startIcon={<DeleteIcon />}
-                  >
-                    Clear History
-                  </Button>
-                </Box>
-
-                {testResult && (
-                  <Box sx={{ mb: 3, p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
-                    <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
-                      Latest Test Result
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary" gutterBottom>
-                      Model: {testResult.model} | {new Date(testResult.timestamp).toLocaleString()}
-                    </Typography>
-                    <Typography variant="body1" sx={{ mt: 1 }}>
-                      {testResult.response}
-                    </Typography>
-                    {testResult.confidence && (
-                      <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                        Confidence: {(testResult.confidence * 100).toFixed(1)}%
-                      </Typography>
-                    )}
-                    {testResult.processing_time_seconds && (
-                      <Typography variant="body2" color="text.secondary">
-                        Processing Time: {testResult.processing_time_seconds.toFixed(2)}s
-                      </Typography>
-                    )}
-                    {testResult.statistics && (
-                      <Box sx={{ mt: 1 }}>
-                        <Typography variant="body2" color="text.secondary">
-                          Benchmark: {testResult.iterations} iterations, 
-                          Avg: {testResult.statistics.average_processing_time.toFixed(2)}s, 
-                          Total: {testResult.statistics.total_time.toFixed(2)}s
-                        </Typography>
-                      </Box>
-                    )}
-                  </Box>
-                )}
-
-                {comparisonResult && (
-                  <Box sx={{ mb: 3, p: 2, bgcolor: 'blue.50', borderRadius: 1 }}>
-                    <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
-                      Model Comparison
-                    </Typography>
-                    {comparisonResult.results?.map((result, index) => (
-                      <Box key={index} sx={{ mb: 2, p: 1, bgcolor: 'white', borderRadius: 1 }}>
-                        <Typography variant="body2" fontWeight="bold">
-                          {result.model}
-                        </Typography>
-                        <Typography variant="body2">
-                          {result.response}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          Time: {result.processing_time_seconds.toFixed(2)}s
-                        </Typography>
-                      </Box>
-                    ))}
-                  </Box>
-                )}
-
-                <Typography variant="subtitle1" gutterBottom sx={{ mt: 3 }}>
-                  Test History ({testHistory.length})
-                </Typography>
-                
-                {testHistory.length === 0 ? (
-                  <Alert severity="info">
-                    No tests have been run yet. Start by selecting a model and running a test.
-                  </Alert>
-                ) : (
-                  <List sx={{ maxHeight: 300, overflow: 'auto' }}>
-                    {testHistory.slice(0, 10).map((test, index) => (
-                      <ListItem key={test.test_id || index} divider>
-                        <ListItemText
-                          primary={
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <Typography variant="body2">
-                                {test.test_type === 'comparison' ? 
-                                  `Comparison: ${test.models_tested?.join(', ')}` :
-                                  test.test_type === 'benchmark' ? 
-                                    `Benchmark: ${test.model} (${test.iterations} iterations)` :
-                                    `Single Test: ${test.model}`
-                                }
-                              </Typography>
-                              <Chip 
-                                label={test.test_type} 
-                                size="small" 
-                                color={test.test_type === 'comparison' ? 'secondary' : 
-                                       test.test_type === 'benchmark' ? 'primary' : 'default'} 
-                              />
-                            </Box>
-                          }
-                          secondary={new Date(test.created_at).toLocaleString()}
-                        />
-                      </ListItem>
-                    ))}
-                  </List>
-                )}
-              </CardContent>
-            </Card>
-          </Grid>
-
-          {/* Model Comparison */}
-          <Grid item xs={12}>
-            <Card>
-              <CardContent>
-                <Typography variant="h6" gutterBottom>
-                  <ViewIcon sx={{ mr: 1, verticalAlign: 'bottom' }} />
-                  Model Comparison
-                </Typography>
-                
-                <FormControl fullWidth margin="normal">
-                  <InputLabel>Select Models to Compare</InputLabel>
-                  <Select
-                    multiple
-                    value={compareModels}
-                    onChange={(e) => setCompareModels(e.target.value)}
-                    renderValue={(selected) => (
-                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                        {selected.map((value) => (
-                          <Chip key={value} label={value} size="small" />
-                        ))}
-                      </Box>
-                    )}
-                  >
-                    {models.map((model) => (
-                      <MenuItem key={model.name} value={model.name}>
-                        <Checkbox checked={compareModels.indexOf(model.name) > -1} />
-                        <ListItemText primary={`${model.name} (${model.type})`} />
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-
-                <Button
-                  variant="contained"
-                  onClick={handleCompareModels}
-                  disabled={isTesting || compareModels.length < 2}
-                  sx={{ mt: 2 }}
-                  startIcon={isTesting ? <CircularProgress size={16} /> : <ViewIcon />}
-                >
-                  {isTesting ? 'Comparing...' : `Compare ${compareModels.length} Models`}
-                </Button>
-              </CardContent>
-            </Card>
-          </Grid>
-        </Grid>
-      )}
 
       {/* Training Configuration Dialog */}
       <Dialog
