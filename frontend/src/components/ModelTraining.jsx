@@ -9,16 +9,205 @@ import {
   LinearProgress,
   Chip,
   Alert,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  TextField,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Tabs,
+  Tab,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemSecondaryAction,
+  IconButton,
+  CircularProgress,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  Slider,
+  FormControlLabel,
+  Checkbox,
 } from '@mui/material';
 import {
   ModelTraining as TrainingIcon,
   PlayArrow as StartIcon,
   Stop as StopIcon,
+  Download as DownloadIcon,
+  Visibility as ViewIcon,
+  Delete as DeleteIcon,
+  ExpandMore as ExpandMoreIcon,
+  Timeline as MetricsIcon,
+  Storage as DatasetIcon,
+  Settings as ConfigIcon,
+  Assessment as TestIcon,
 } from '@mui/icons-material';
+import { trainingAPI, datasetAPI } from '../services/api.jsx';
+import { DATASET_TYPES, DATASET_TYPE_INFO } from '../constants/datasetTypes.js';
 
 const ModelTraining = ({ onNotification }) => {
+  const [activeTab, setActiveTab] = useState(0);
+  const [datasets, setDatasets] = useState([]);
   const [trainingJobs, setTrainingJobs] = useState([]);
+  const [models, setModels] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [selectedDataset, setSelectedDataset] = useState('');
+  const [trainingConfig, setTrainingConfig] = useState({
+    modelName: '',
+    baseModel: 'yolo11n',
+    epochs: 100,
+    batchSize: 16,
+    learningRate: 0.001,
+    imageSize: 640,
+    patience: 10,
+    device: 'auto',
+  });
+  const [startTrainingDialog, setStartTrainingDialog] = useState(false);
+  const [isStartingTraining, setIsStartingTraining] = useState(false);
+
+  // Load data on component mount
+  useEffect(() => {
+    loadDatasets();
+    loadTrainingJobs();
+    loadModels();
+  }, []);
+
+  const loadDatasets = async () => {
+    try {
+      const response = await datasetAPI.listDatasets();
+      setDatasets(response.data?.datasets || []);
+    } catch (error) {
+      console.error('Failed to load datasets:', error);
+    }
+  };
+
+  const loadTrainingJobs = async () => {
+    try {
+      const response = await trainingAPI.listTrainingJobs();
+      setTrainingJobs(response.data?.jobs || []);
+    } catch (error) {
+      console.error('Failed to load training jobs:', error);
+    }
+  };
+
+  const loadModels = async () => {
+    try {
+      const response = await trainingAPI.listModels();
+      setModels(response.data?.models || []);
+    } catch (error) {
+      console.error('Failed to load models:', error);
+    }
+  };
+
+  const handleStartTraining = async () => {
+    if (!selectedDataset || !trainingConfig.modelName) {
+      onNotification({
+        type: 'warning',
+        title: 'Missing Information',
+        message: 'Please select a dataset and provide a model name'
+      });
+      return;
+    }
+
+    setIsStartingTraining(true);
+    try {
+      const dataset = datasets.find(d => d.id === selectedDataset);
+      const config = {
+        ...trainingConfig,
+        datasetId: selectedDataset,
+        datasetType: dataset?.dataset_type,
+      };
+
+      const response = await trainingAPI.startTraining(config);
+      
+      onNotification({
+        type: 'success',
+        title: 'Training Started',
+        message: `Training job ${response.data.jobId} started successfully`
+      });
+
+      setStartTrainingDialog(false);
+      await loadTrainingJobs();
+    } catch (error) {
+      onNotification({
+        type: 'error',
+        title: 'Training Failed',
+        message: error.response?.data?.detail || 'Failed to start training'
+      });
+    } finally {
+      setIsStartingTraining(false);
+    }
+  };
+
+  const handleStopTraining = async (jobId) => {
+    try {
+      await trainingAPI.stopTraining(jobId);
+      onNotification({
+        type: 'info',
+        title: 'Training Stopped',
+        message: `Training job ${jobId} has been stopped`
+      });
+      await loadTrainingJobs();
+    } catch (error) {
+      onNotification({
+        type: 'error',
+        title: 'Stop Failed',
+        message: 'Failed to stop training job'
+      });
+    }
+  };
+
+  const getDatasetTypeColor = (type) => {
+    switch (type) {
+      case DATASET_TYPES.OBJECT_DETECTION: return 'primary';
+      case DATASET_TYPES.IMAGE_CLASSIFICATION: return 'secondary';
+      case DATASET_TYPES.VISION_LLM: return 'success';
+      default: return 'default';
+    }
+  };
+
+  const getJobStatusColor = (status) => {
+    switch (status) {
+      case 'running': return 'primary';
+      case 'completed': return 'success';
+      case 'failed': return 'error';
+      case 'stopped': return 'warning';
+      default: return 'default';
+    }
+  };
+
+  const getBaseModels = (datasetType) => {
+    switch (datasetType) {
+      case DATASET_TYPES.OBJECT_DETECTION:
+        return [
+          { value: 'yolo11n', label: 'YOLO11 Nano (Fast)' },
+          { value: 'yolo11s', label: 'YOLO11 Small' },
+          { value: 'yolo11m', label: 'YOLO11 Medium' },
+          { value: 'yolo11l', label: 'YOLO11 Large' },
+          { value: 'yolo11x', label: 'YOLO11 Extra Large' },
+        ];
+      case DATASET_TYPES.IMAGE_CLASSIFICATION:
+        return [
+          { value: 'resnet50', label: 'ResNet50' },
+          { value: 'efficientnet_b0', label: 'EfficientNet B0' },
+          { value: 'mobilenet_v3', label: 'MobileNet V3' },
+          { value: 'vit_base', label: 'Vision Transformer Base' },
+        ];
+      case DATASET_TYPES.VISION_LLM:
+        return [
+          { value: 'llava-7b', label: 'LLaVA 7B' },
+          { value: 'llava-13b', label: 'LLaVA 13B' },
+          { value: 'moondream2', label: 'Moondream2' },
+          { value: 'blip2', label: 'BLIP2' },
+        ];
+      default:
+        return [];
+    }
+  };
 
   return (
     <Box sx={{ p: 3 }}>
@@ -27,62 +216,319 @@ const ModelTraining = ({ onNotification }) => {
           Model Training
         </Typography>
         <Typography variant="body1" color="text.secondary">
-          Train and fine-tune vision models for TV/STB recognition
+          Train and fine-tune AI models for TV/STB recognition
         </Typography>
       </Box>
 
-      <Alert severity="info" sx={{ mb: 3 }}>
-        Model Training interface is coming soon! This will allow you to:
-        <ul>
-          <li>Select base models (LLaVA, Moondream, etc.)</li>
-          <li>Configure training parameters</li>
-          <li>Monitor training progress in real-time</li>
-          <li>Evaluate model performance</li>
-        </ul>
-      </Alert>
+      <Tabs value={activeTab} onChange={(e, newValue) => setActiveTab(newValue)} sx={{ mb: 3 }}>
+        <Tab label="Start Training" icon={<StartIcon />} />
+        <Tab label="Training Jobs" icon={<TrainingIcon />} />
+        <Tab label="Trained Models" icon={<ConfigIcon />} />
+        <Tab label="Model Testing" icon={<TestIcon />} />
+      </Tabs>
 
-      <Card>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>
-            Training Pipeline
-          </Typography>
-          <Grid container spacing={2}>
-            <Grid item xs={12} md={4}>
-              <Card variant="outlined">
-                <CardContent>
-                  <TrainingIcon color="primary" sx={{ mb: 1 }} />
-                  <Typography variant="h6">Data Preparation</Typography>
-                  <Typography color="text.secondary">
-                    Load and validate training datasets
-                  </Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-            <Grid item xs={12} md={4}>
-              <Card variant="outlined">
-                <CardContent>
-                  <StartIcon color="success" sx={{ mb: 1 }} />
-                  <Typography variant="h6">Model Training</Typography>
-                  <Typography color="text.secondary">
-                    Fine-tune models with LoRA/QLoRA
-                  </Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-            <Grid item xs={12} md={4}>
-              <Card variant="outlined">
-                <CardContent>
-                  <StopIcon color="warning" sx={{ mb: 1 }} />
-                  <Typography variant="h6">Evaluation</Typography>
-                  <Typography color="text.secondary">
-                    Validate and deploy trained models
-                  </Typography>
-                </CardContent>
-              </Card>
-            </Grid>
+      {/* Start Training Tab */}
+      {activeTab === 0 && (
+        <Grid container spacing={3}>
+          <Grid item xs={12} md={6}>
+            <Card>
+              <CardContent>
+                <Typography variant="h6" gutterBottom>
+                  <DatasetIcon sx={{ mr: 1, verticalAlign: 'bottom' }} />
+                  Available Datasets
+                </Typography>
+                
+                {datasets.length === 0 ? (
+                  <Alert severity="info">
+                    No datasets found. Create and label datasets first in the Dataset Creation tab.
+                  </Alert>
+                ) : (
+                  <List>
+                    {datasets.map((dataset) => (
+                      <ListItem
+                        key={dataset.id}
+                        button
+                        selected={selectedDataset === dataset.id}
+                        onClick={() => setSelectedDataset(dataset.id)}
+                      >
+                        <ListItemText
+                          primary={dataset.name}
+                          secondary={`${dataset.dataset_type} • ${dataset.image_count || 0} images`}
+                        />
+                        <ListItemSecondaryAction>
+                          <Chip
+                            label={DATASET_TYPE_INFO[dataset.dataset_type]?.name || dataset.dataset_type}
+                            color={getDatasetTypeColor(dataset.dataset_type)}
+                            size="small"
+                          />
+                        </ListItemSecondaryAction>
+                      </ListItem>
+                    ))}
+                  </List>
+                )}
+
+                <Button
+                  variant="contained"
+                  startIcon={<StartIcon />}
+                  onClick={() => setStartTrainingDialog(true)}
+                  disabled={!selectedDataset}
+                  fullWidth
+                  sx={{ mt: 2 }}
+                >
+                  Configure Training
+                </Button>
+              </CardContent>
+            </Card>
           </Grid>
-        </CardContent>
-      </Card>
+
+          <Grid item xs={12} md={6}>
+            <Card>
+              <CardContent>
+                <Typography variant="h6" gutterBottom>
+                  <MetricsIcon sx={{ mr: 1, verticalAlign: 'bottom' }} />
+                  Quick Start Guide
+                </Typography>
+                
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="subtitle2" color="primary" gutterBottom>
+                    1. Select Dataset
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Choose a dataset with labeled images from the list
+                  </Typography>
+                </Box>
+
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="subtitle2" color="primary" gutterBottom>
+                    2. Configure Training
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Set model name, base model, and training parameters
+                  </Typography>
+                </Box>
+
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="subtitle2" color="primary" gutterBottom>
+                    3. Monitor Progress
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Watch training metrics and logs in real-time
+                  </Typography>
+                </Box>
+
+                <Box>
+                  <Typography variant="subtitle2" color="primary" gutterBottom>
+                    4. Test Model
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Evaluate performance and deploy for inference
+                  </Typography>
+                </Box>
+              </CardContent>
+            </Card>
+          </Grid>
+        </Grid>
+      )}
+
+      {/* Training Jobs Tab */}
+      {activeTab === 1 && (
+        <Card>
+          <CardContent>
+            <Typography variant="h6" gutterBottom>
+              Active Training Jobs
+            </Typography>
+            
+            {trainingJobs.length === 0 ? (
+              <Alert severity="info">
+                No training jobs found. Start a new training job to see progress here.
+              </Alert>
+            ) : (
+              <List>
+                {trainingJobs.map((job) => (
+                  <ListItem key={job.id}>
+                    <ListItemText
+                      primary={job.modelName}
+                      secondary={`Started: ${new Date(job.startTime).toLocaleString()} • Dataset: ${job.datasetName}`}
+                    />
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Chip
+                        label={job.status}
+                        color={getJobStatusColor(job.status)}
+                        size="small"
+                      />
+                      {job.status === 'running' && (
+                        <Button
+                          startIcon={<StopIcon />}
+                          onClick={() => handleStopTraining(job.id)}
+                          color="warning"
+                          size="small"
+                        >
+                          Stop
+                        </Button>
+                      )}
+                    </Box>
+                  </ListItem>
+                ))}
+              </List>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Trained Models Tab */}
+      {activeTab === 2 && (
+        <Card>
+          <CardContent>
+            <Typography variant="h6" gutterBottom>
+              Trained Models
+            </Typography>
+            
+            {models.length === 0 ? (
+              <Alert severity="info">
+                No trained models found. Complete training jobs will appear here.
+              </Alert>
+            ) : (
+              <List>
+                {models.map((model) => (
+                  <ListItem key={model.name}>
+                    <ListItemText
+                      primary={model.name}
+                      secondary={`Type: ${model.type} • Created: ${new Date(model.createdAt).toLocaleString()}`}
+                    />
+                    <ListItemSecondaryAction>
+                      <IconButton onClick={() => console.log('Download', model.name)}>
+                        <DownloadIcon />
+                      </IconButton>
+                      <IconButton onClick={() => console.log('View', model.name)}>
+                        <ViewIcon />
+                      </IconButton>
+                      <IconButton onClick={() => console.log('Delete', model.name)} color="error">
+                        <DeleteIcon />
+                      </IconButton>
+                    </ListItemSecondaryAction>
+                  </ListItem>
+                ))}
+              </List>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Model Testing Tab */}
+      {activeTab === 3 && (
+        <Card>
+          <CardContent>
+            <Typography variant="h6" gutterBottom>
+              Model Testing & Evaluation
+            </Typography>
+            <Alert severity="info">
+              Model testing interface will allow you to:
+              <ul>
+                <li>Test trained models on new images</li>
+                <li>Compare model performance</li>
+                <li>Run inference benchmarks</li>
+                <li>Deploy models for live testing</li>
+              </ul>
+            </Alert>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Training Configuration Dialog */}
+      <Dialog
+        open={startTrainingDialog}
+        onClose={() => setStartTrainingDialog(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>Configure Training Parameters</DialogTitle>
+        <DialogContent>
+          {selectedDataset && (
+            <>
+              <TextField
+                fullWidth
+                label="Model Name"
+                value={trainingConfig.modelName}
+                onChange={(e) => setTrainingConfig({ ...trainingConfig, modelName: e.target.value })}
+                margin="normal"
+                placeholder="my-tv-detection-model"
+              />
+
+              <FormControl fullWidth margin="normal">
+                <InputLabel>Base Model</InputLabel>
+                <Select
+                  value={trainingConfig.baseModel}
+                  onChange={(e) => setTrainingConfig({ ...trainingConfig, baseModel: e.target.value })}
+                >
+                  {getBaseModels(datasets.find(d => d.id === selectedDataset)?.dataset_type).map((model) => (
+                    <MenuItem key={model.value} value={model.value}>
+                      {model.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+
+              <Accordion sx={{ mt: 2 }}>
+                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                  <Typography>Advanced Parameters</Typography>
+                </AccordionSummary>
+                <AccordionDetails>
+                  <Grid container spacing={2}>
+                    <Grid item xs={6}>
+                      <TextField
+                        fullWidth
+                        label="Epochs"
+                        type="number"
+                        value={trainingConfig.epochs}
+                        onChange={(e) => setTrainingConfig({ ...trainingConfig, epochs: parseInt(e.target.value) })}
+                      />
+                    </Grid>
+                    <Grid item xs={6}>
+                      <TextField
+                        fullWidth
+                        label="Batch Size"
+                        type="number"
+                        value={trainingConfig.batchSize}
+                        onChange={(e) => setTrainingConfig({ ...trainingConfig, batchSize: parseInt(e.target.value) })}
+                      />
+                    </Grid>
+                    <Grid item xs={6}>
+                      <TextField
+                        fullWidth
+                        label="Learning Rate"
+                        type="number"
+                        step="0.0001"
+                        value={trainingConfig.learningRate}
+                        onChange={(e) => setTrainingConfig({ ...trainingConfig, learningRate: parseFloat(e.target.value) })}
+                      />
+                    </Grid>
+                    <Grid item xs={6}>
+                      <TextField
+                        fullWidth
+                        label="Image Size"
+                        type="number"
+                        value={trainingConfig.imageSize}
+                        onChange={(e) => setTrainingConfig({ ...trainingConfig, imageSize: parseInt(e.target.value) })}
+                      />
+                    </Grid>
+                  </Grid>
+                </AccordionDetails>
+              </Accordion>
+            </>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setStartTrainingDialog(false)}>Cancel</Button>
+          <Button
+            onClick={handleStartTraining}
+            variant="contained"
+            disabled={isStartingTraining}
+            startIcon={isStartingTraining ? <CircularProgress size={16} /> : <StartIcon />}
+          >
+            {isStartingTraining ? 'Starting...' : 'Start Training'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

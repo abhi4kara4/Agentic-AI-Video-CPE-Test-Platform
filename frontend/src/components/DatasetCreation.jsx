@@ -981,6 +981,9 @@ const DatasetCreation = ({ onNotification }) => {
         message: `${response.data.zip_file} created with ${response.data.train_images} training and ${response.data.val_images} validation images`
       });
 
+      // Mark the Generate Dataset step as completed
+      setCurrentStep(5);
+
     } catch (error) {
       console.error('Failed to generate training dataset:', error);
       onNotification({

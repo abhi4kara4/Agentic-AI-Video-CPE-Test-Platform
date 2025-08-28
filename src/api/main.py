@@ -583,9 +583,12 @@ async def create_dataset(request: CreateDatasetRequest):
             "augmentation_options": request.augmentationOptions or {},
             "supported_formats": request.supportedFormats or [],
             "created_at": datetime.now().isoformat(),
-            "image_count": 0,
-            "screen_states": SCREEN_STATES
+            "image_count": 0
         }
+        
+        # Only add screen_states for vision_llm datasets
+        if request.datasetType == "vision_llm":
+            metadata["screen_states"] = SCREEN_STATES
         
         with open(dataset_dir / "metadata.json", "w") as f:
             json.dump(metadata, f, indent=2)
