@@ -1023,13 +1023,16 @@ async def generate_llava_dataset(training_dir: Path, train_images: list, val_ima
         json.dump(val_data, f, indent=2)
 
 
+class GenerateTrainingRequest(BaseModel):
+    format: str = "yolo"
+    train_split: float = 0.8
+    augment: bool = True
+    augment_factor: int = 3
+
 @app.post("/dataset/{dataset_name}/generate-training")
 async def generate_training_dataset(
     dataset_name: str, 
-    format: str = "yolo",
-    train_split: float = 0.8,
-    augment: bool = True,
-    augment_factor: int = 3
+    request: GenerateTrainingRequest
 ):
     """Generate a training dataset with proper format, train/test split, and augmentation"""
     try:
@@ -1055,40 +1058,62 @@ async def generate_training_dataset(
             raise HTTPException(status_code=400, detail="Dataset images or annotations directory not found")
         
         labeled_images = []
-        for annotation_file in annotations_dir.glob("*.json"):
-            image_file = images_dir / f"{annotation_file.stem}.jpg"
-            if image_file.exists():
-                with open(annotation_file) as f:
-                    annotation = json.load(f)
-                labeled_images.append({
-                    "image_file": image_file,
-                    "annotation_file": annotation_file,
-                    "annotation": annotation
-                })
+        
+        # Debug logging
+        annotation_files = list(annotations_dir.glob("*.json"))
+        log.info(f"Found {len(annotation_files)} annotation files in {annotations_dir}")
+        
+        for annotation_file in annotation_files:
+            # Try different image extensions
+            image_extensions = ['.jpg', '.jpeg', '.png']
+            image_file = None
+            
+            for ext in image_extensions:
+                potential_image = images_dir / f"{annotation_file.stem}{ext}"
+                if potential_image.exists():
+                    image_file = potential_image
+                    break
+            
+            if image_file and image_file.exists():
+                try:
+                    with open(annotation_file) as f:
+                        annotation = json.load(f)
+                    labeled_images.append({
+                        "image_file": image_file,
+                        "annotation_file": annotation_file,
+                        "annotation": annotation
+                    })
+                    log.info(f"Added labeled image: {image_file.name} -> {annotation_file.name}")
+                except Exception as e:
+                    log.warning(f"Failed to load annotation {annotation_file}: {e}")
+            else:
+                log.warning(f"No matching image found for annotation {annotation_file.stem}")
+        
+        log.info(f"Total labeled images found: {len(labeled_images)}")
         
         if len(labeled_images) == 0:
             raise HTTPException(status_code=400, detail="No labeled images found in dataset")
         
         # Create training dataset directory
-        training_dir = TRAINING_DIR / f"{dataset_name}_training_{format}"
+        training_dir = TRAINING_DIR / f"{dataset_name}_training_{request.format}"
         training_dir.mkdir(parents=True, exist_ok=True)
         
         # Split dataset
         import random
         random.shuffle(labeled_images)
-        split_idx = int(len(labeled_images) * train_split)
+        split_idx = int(len(labeled_images) * request.train_split)
         train_images = labeled_images[:split_idx]
         val_images = labeled_images[split_idx:]
         
         # Generate dataset based on format
-        if format == "yolo" and dataset_type == "object_detection":
-            await generate_yolo_dataset(training_dir, train_images, val_images, augment, augment_factor)
-        elif format == "folder_structure" and dataset_type == "image_classification":
-            await generate_classification_dataset(training_dir, train_images, val_images, augment, augment_factor)
-        elif format == "llava" and dataset_type == "vision_llm":
-            await generate_llava_dataset(training_dir, train_images, val_images, augment, augment_factor)
+        if request.format == "yolo" and dataset_type == "object_detection":
+            await generate_yolo_dataset(training_dir, train_images, val_images, request.augment, request.augment_factor)
+        elif request.format == "folder_structure" and dataset_type == "image_classification":
+            await generate_classification_dataset(training_dir, train_images, val_images, request.augment, request.augment_factor)
+        elif request.format == "llava" and dataset_type == "vision_llm":
+            await generate_llava_dataset(training_dir, train_images, val_images, request.augment, request.augment_factor)
         else:
-            raise HTTPException(status_code=400, detail=f"Format '{format}' not supported for dataset type '{dataset_type}'")
+            raise HTTPException(status_code=400, detail=f"Format '{request.format}' not supported for dataset type '{dataset_type}'")
         
         # Create ZIP file
         import zipfile
@@ -1109,11 +1134,11 @@ async def generate_training_dataset(
         return {
             "message": "Training dataset generated successfully",
             "dataset_name": dataset_name,
-            "format": format,
+            "format": request.format,
             "total_images": len(labeled_images),
             "train_images": len(train_images),
             "val_images": len(val_images),
-            "augmentation_enabled": augment,
+            "augmentation_enabled": request.augment,
             "zip_file": str(zip_path.name),
             "file_size": zip_path.stat().st_size
         }
