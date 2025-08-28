@@ -1079,11 +1079,14 @@ async def generate_training_dataset(
                 
                 # Check if annotation has image_filename field
                 image_filename = annotation.get("image_filename")
+                log.info(f"Annotation {annotation_file.stem}: image_filename = {image_filename}")
+                
                 if image_filename:
                     # Try exact filename match
                     potential_image = images_dir / image_filename
                     if potential_image.exists():
                         image_file = potential_image
+                        log.info(f"Exact match found: {image_filename}")
                     else:
                         # Try without extension and add common extensions
                         base_name = Path(image_filename).stem
@@ -1091,6 +1094,7 @@ async def generate_training_dataset(
                             potential_image = images_dir / f"{base_name}{ext}"
                             if potential_image.exists():
                                 image_file = potential_image
+                                log.info(f"Extension match found: {potential_image.name}")
                                 break
                 
                 # If still no match, try annotation filename based matching
@@ -1109,6 +1113,25 @@ async def generate_training_dataset(
                         if timestamp in img_file.stem or any(ts in img_file.stem for ts in [timestamp[-6:], timestamp[-8:]]):
                             image_file = img_file
                             break
+                
+                # Final fallback: Try to match by file creation/modification time
+                if not image_file:
+                    annotation_mtime = annotation_file.stat().st_mtime
+                    closest_image = None
+                    min_time_diff = float('inf')
+                    
+                    for img_file in image_files:
+                        if img_file.suffix.lower() in ['.jpg', '.jpeg', '.png']:
+                            img_mtime = img_file.stat().st_mtime
+                            time_diff = abs(annotation_mtime - img_mtime)
+                            if time_diff < min_time_diff:
+                                min_time_diff = time_diff
+                                closest_image = img_file
+                    
+                    # Only use if within 5 minutes (300 seconds)
+                    if closest_image and min_time_diff < 300:
+                        image_file = closest_image
+                        log.info(f"Time-based match: {closest_image.name} (diff: {min_time_diff:.1f}s)")
                 
                 if image_file and image_file.exists():
                     labeled_images.append({
