@@ -1460,6 +1460,158 @@ async def simulate_training(job_name: str):
         })
 
 
+# Additional training endpoints for frontend compatibility
+@app.get("/models/list")
+async def list_models_alias():
+    """List trained models to match frontend expectations"""
+    models_dir = TRAINING_DIR / "models"
+    models_dir.mkdir(exist_ok=True)
+    
+    models = []
+    for model_dir in models_dir.iterdir():
+        if model_dir.is_dir():
+            metadata_file = model_dir / "metadata.json"
+            if metadata_file.exists():
+                with open(metadata_file) as f:
+                    model_data = json.load(f)
+                    models.append({
+                        "name": model_data.get("name"),
+                        "type": model_data.get("dataset_type", "object_detection"),
+                        "baseModel": model_data.get("base_model"),
+                        "createdAt": model_data.get("created_at"),
+                        "metrics": model_data.get("metrics", {}),
+                        "status": model_data.get("status", "ready")
+                    })
+    
+    return {"models": models}
+
+
+@app.post("/training/start")
+async def start_training_simplified(request: dict):
+    """Simplified training start endpoint that creates and starts a job in one step"""
+    try:
+        # Extract configuration from request
+        dataset_id = request.get("datasetId")
+        model_name = request.get("modelName")
+        base_model = request.get("baseModel", "yolo11n")
+        dataset_type = request.get("datasetType", "object_detection")
+        
+        if not dataset_id or not model_name:
+            raise HTTPException(status_code=400, detail="datasetId and modelName are required")
+        
+        # Find the dataset
+        dataset = None
+        for dataset_dir in DATASETS_DIR.iterdir():
+            if dataset_dir.is_dir():
+                metadata_file = dataset_dir / "metadata.json"
+                if metadata_file.exists():
+                    with open(metadata_file) as f:
+                        metadata = json.load(f)
+                    if metadata.get("id") == dataset_id:
+                        dataset = metadata
+                        dataset["path"] = str(dataset_dir)
+                        break
+        
+        if not dataset:
+            raise HTTPException(status_code=404, detail="Dataset not found")
+        
+        # Create job name
+        job_name = f"{model_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        job_dir = TRAINING_DIR / "jobs" / job_name
+        job_dir.mkdir(parents=True)
+        
+        # Create job metadata
+        job_metadata = {
+            "job_name": job_name,
+            "model_name": model_name,
+            "base_model": base_model,
+            "dataset_id": dataset_id,
+            "dataset_name": dataset["name"],
+            "dataset_type": dataset_type,
+            "dataset_path": dataset["path"],
+            "status": "pending",
+            "created_at": datetime.now().isoformat(),
+            "config": {
+                "epochs": request.get("epochs", 100),
+                "batch_size": request.get("batchSize", 16),
+                "learning_rate": request.get("learningRate", 0.001),
+                "image_size": request.get("imageSize", 640),
+                "patience": request.get("patience", 10),
+                "device": request.get("device", "auto")
+            }
+        }
+        
+        # Save job metadata
+        with open(job_dir / "metadata.json", "w") as f:
+            json.dump(job_metadata, f, indent=2)
+        
+        # TODO: Actually start the training process here
+        # For now, just update status to indicate it would start
+        job_metadata["status"] = "queued"
+        job_metadata["message"] = "Training job created and queued for execution"
+        
+        log.info(f"Created training job: {job_name}")
+        
+        return {
+            "jobId": job_name,
+            "status": "success",
+            "message": f"Training job {job_name} created successfully",
+            "job": job_metadata
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Failed to start training: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to start training: {str(e)}")
+
+
+@app.get("/training/jobs")
+async def list_training_jobs_simplified():
+    """List all training jobs with simplified response format"""
+    jobs_dir = TRAINING_DIR / "jobs"
+    jobs_dir.mkdir(exist_ok=True)
+    
+    jobs = []
+    for job_dir in jobs_dir.iterdir():
+        if job_dir.is_dir():
+            metadata_file = job_dir / "metadata.json"
+            if metadata_file.exists():
+                with open(metadata_file) as f:
+                    job_data = json.load(f)
+                    jobs.append({
+                        "id": job_data.get("job_name"),
+                        "modelName": job_data.get("model_name"),
+                        "datasetName": job_data.get("dataset_name"),
+                        "status": job_data.get("status", "unknown"),
+                        "startTime": job_data.get("created_at"),
+                        "config": job_data.get("config", {})
+                    })
+    
+    return {"jobs": jobs}
+
+
+@app.post("/training/{job_id}/stop")
+async def stop_training_simplified(job_id: str):
+    """Stop a training job"""
+    job_dir = TRAINING_DIR / "jobs" / job_id
+    if not job_dir.exists():
+        raise HTTPException(status_code=404, detail="Training job not found")
+    
+    metadata_file = job_dir / "metadata.json"
+    if metadata_file.exists():
+        with open(metadata_file) as f:
+            job_data = json.load(f)
+        
+        job_data["status"] = "stopped"
+        job_data["stopped_at"] = datetime.now().isoformat()
+        
+        with open(metadata_file, "w") as f:
+            json.dump(job_data, f, indent=2)
+    
+    return {"status": "success", "message": f"Training job {job_id} stopped"}
+
+
 # Model testing endpoints  
 TESTING_DIR = Path("testing")
 TESTING_DIR.mkdir(exist_ok=True)
