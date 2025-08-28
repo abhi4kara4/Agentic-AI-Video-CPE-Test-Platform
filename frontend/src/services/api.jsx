@@ -140,6 +140,8 @@ export const trainingAPI = {
   // Training operations
   startTraining: (config) => apiClient.post('/training/start', config),
   stopTraining: (jobId) => apiClient.post(`/training/${jobId}/stop`),
+  resumeTraining: (jobId) => apiClient.post(`/training/${jobId}/resume`),
+  deleteTrainingJob: (jobId) => apiClient.delete(`/training/${jobId}`),
   getTrainingStatus: (jobId) => apiClient.get(`/training/${jobId}/status`),
   getTrainingLogs: (jobId, lines = 100) => 
     apiClient.get(`/training/${jobId}/logs?lines=${lines}`),
@@ -161,24 +163,22 @@ export const trainingAPI = {
 
 // Testing API
 export const testingAPI = {
-  testModel: (modelName, imageBase64, prompt) => 
-    apiClient.post('/test/model', { 
-      model_name: modelName, 
-      image: imageBase64, 
+  testModel: (modelName, prompt = "Describe what you see on this TV screen") => 
+    apiClient.post(`/test/models/${modelName}/analyze`, { prompt }),
+  benchmarkModel: (modelName, iterations = 5, prompt = "Describe what you see on this TV screen") => 
+    apiClient.post(`/test/benchmark/${modelName}`, { 
+      iterations,
       prompt 
     }),
-  benchmarkModel: (modelName, testImages) => 
-    apiClient.post('/test/benchmark', { 
-      model_name: modelName, 
-      test_images: testImages 
-    }),
-  compareModels: (models, testImages) => 
-    apiClient.post('/test/compare', { 
+  compareModels: (models, prompt = "Describe what you see on this TV screen") => 
+    apiClient.post('/test/models/compare', { 
       models, 
-      test_images: testImages 
+      prompt 
     }),
+  getTestHistory: () => apiClient.get('/test/history'),
+  clearTestHistory: () => apiClient.delete('/test/history/clear'),
   
-  // Live testing
+  // Live testing (placeholder for future implementation)
   startLiveTest: (modelName, streamConfig) => 
     apiClient.post('/test/live/start', { 
       model_name: modelName, 

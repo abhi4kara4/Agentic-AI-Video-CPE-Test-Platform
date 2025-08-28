@@ -1460,6 +1460,9 @@ async def simulate_training(job_name: str):
         })
 
 
+# Global variable to track running training tasks
+running_training_tasks = {}
+
 # Training execution function
 async def execute_training_job(job_name: str, job_metadata: dict, job_dir: Path):
     """Execute the actual training job with progress updates"""
@@ -1484,6 +1487,13 @@ async def execute_training_job(job_name: str, job_metadata: dict, job_dir: Path)
         
         # Simulate training progress (replace with actual training logic)
         for epoch in range(1, total_epochs + 1):
+            # Check if job has been stopped
+            with open(job_dir / "metadata.json") as f:
+                current_metadata = json.load(f)
+            if current_metadata.get("status") == "stopped":
+                log.info(f"Training job {job_name} was stopped at epoch {epoch}")
+                return
+            
             # Simulate epoch duration (replace with actual training)
             await asyncio.sleep(2)  # 2 seconds per epoch for demo
             
@@ -1558,6 +1568,10 @@ async def execute_training_job(job_name: str, job_metadata: dict, job_dir: Path)
         
         log.info(f"Training job {job_name} completed successfully")
         
+        # Clean up task tracking
+        if job_name in running_training_tasks:
+            del running_training_tasks[job_name]
+        
     except Exception as e:
         # Training failed
         job_metadata["status"] = "failed"
@@ -1573,6 +1587,10 @@ async def execute_training_job(job_name: str, job_metadata: dict, job_dir: Path)
         })
         
         log.error(f"Training job {job_name} failed: {e}")
+        
+        # Clean up task tracking
+        if job_name in running_training_tasks:
+            del running_training_tasks[job_name]
 
 
 # Additional training endpoints for frontend compatibility
@@ -1660,8 +1678,9 @@ async def start_training_simplified(request: dict):
         with open(job_dir / "metadata.json", "w") as f:
             json.dump(job_metadata, f, indent=2)
         
-        # Start training in background
-        asyncio.create_task(execute_training_job(job_name, job_metadata, job_dir))
+        # Start training in background and track the task
+        task = asyncio.create_task(execute_training_job(job_name, job_metadata, job_dir))
+        running_training_tasks[job_name] = task
         
         log.info(f"Created and started training job: {job_name}")
         
@@ -1698,7 +1717,8 @@ async def list_training_jobs_simplified():
                         "datasetName": job_data.get("dataset_name"),
                         "status": job_data.get("status", "unknown"),
                         "startTime": job_data.get("created_at"),
-                        "config": job_data.get("config", {})
+                        "config": job_data.get("config", {}),
+                        "progress": job_data.get("progress", {})
                     })
     
     return {"jobs": jobs}
@@ -1721,8 +1741,81 @@ async def stop_training_simplified(job_id: str):
         
         with open(metadata_file, "w") as f:
             json.dump(job_data, f, indent=2)
+        
+        # Cancel the running task if it exists
+        if job_id in running_training_tasks:
+            task = running_training_tasks[job_id]
+            if not task.done():
+                task.cancel()
+            del running_training_tasks[job_id]
+        
+        # Broadcast the stop event
+        await broadcast_update("training_stopped", {
+            "job_name": job_id,
+            "status": "stopped",
+            "stopped_at": job_data["stopped_at"]
+        })
+        
+        log.info(f"Training job {job_id} stopped successfully")
     
     return {"status": "success", "message": f"Training job {job_id} stopped"}
+
+
+@app.post("/training/{job_id}/resume")
+async def resume_training_job(job_id: str):
+    """Resume a pending training job"""
+    job_dir = TRAINING_DIR / "jobs" / job_id
+    if not job_dir.exists():
+        raise HTTPException(status_code=404, detail="Training job not found")
+    
+    metadata_file = job_dir / "metadata.json"
+    if not metadata_file.exists():
+        raise HTTPException(status_code=404, detail="Training job metadata not found")
+    
+    with open(metadata_file) as f:
+        job_data = json.load(f)
+    
+    if job_data.get("status") != "pending":
+        raise HTTPException(status_code=400, detail="Only pending jobs can be resumed")
+    
+    # Start the training job
+    task = asyncio.create_task(execute_training_job(job_id, job_data, job_dir))
+    running_training_tasks[job_id] = task
+    
+    log.info(f"Resumed training job: {job_id}")
+    
+    return {"status": "success", "message": f"Training job {job_id} resumed"}
+
+
+@app.delete("/training/{job_id}")
+async def delete_training_job(job_id: str):
+    """Delete a training job (only if not running)"""
+    job_dir = TRAINING_DIR / "jobs" / job_id
+    if not job_dir.exists():
+        raise HTTPException(status_code=404, detail="Training job not found")
+    
+    metadata_file = job_dir / "metadata.json"
+    if metadata_file.exists():
+        with open(metadata_file) as f:
+            job_data = json.load(f)
+        
+        if job_data.get("status") == "running":
+            raise HTTPException(status_code=400, detail="Cannot delete running job. Stop it first.")
+    
+    # Cancel task if it exists (for safety)
+    if job_id in running_training_tasks:
+        task = running_training_tasks[job_id]
+        if not task.done():
+            task.cancel()
+        del running_training_tasks[job_id]
+    
+    # Delete the job directory
+    import shutil
+    shutil.rmtree(job_dir)
+    
+    log.info(f"Deleted training job: {job_id}")
+    
+    return {"status": "success", "message": f"Training job {job_id} deleted"}
 
 
 # Model testing endpoints  

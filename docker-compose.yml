@@ -48,6 +48,7 @@ services:
       - ./screenshots:/app/screenshots
       - ./datasets:/app/datasets
       - ./training:/app/training
+      - ./testing:/app/testing
       - ./reports:/app/reports
       - ./logs:/app/logs
       - ./.env:/app/.env
@@ -79,6 +80,7 @@ services:
       - ./screenshots:/app/screenshots
       - ./datasets:/app/datasets
       - ./training:/app/training
+      - ./testing:/app/testing
       - ./.env:/app/.env
     environment:
       - OLLAMA_HOST=http://ollama:11434
