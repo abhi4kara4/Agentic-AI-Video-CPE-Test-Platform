@@ -284,6 +284,9 @@ const ModelTraining = ({ onNotification }) => {
   });
   const [startTrainingDialog, setStartTrainingDialog] = useState(false);
   const [isStartingTraining, setIsStartingTraining] = useState(false);
+  const [modelDetailsDialog, setModelDetailsDialog] = useState(false);
+  const [selectedModelForDetails, setSelectedModelForDetails] = useState(null);
+  const [modelDetails, setModelDetails] = useState(null);
 
   // Load data on component mount
   useEffect(() => {
@@ -477,6 +480,83 @@ const ModelTraining = ({ onNotification }) => {
         type: 'error',
         title: 'Delete Failed',
         message: error.response?.data?.detail || 'Failed to delete training job'
+      });
+    }
+  };
+
+  const handleDownloadModel = async (modelName) => {
+    try {
+      const response = await trainingAPI.downloadModel(modelName);
+      
+      // Create download link
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `${modelName}.zip`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      
+      onNotification({
+        type: 'success',
+        title: 'Download Started',
+        message: `Downloading model ${modelName}`
+      });
+    } catch (error) {
+      onNotification({
+        type: 'error',
+        title: 'Download Failed',
+        message: error.response?.data?.detail || 'Failed to download model'
+      });
+    }
+  };
+
+  const handleViewModelDetails = async (model) => {
+    try {
+      setSelectedModelForDetails(model);
+      setModelDetailsDialog(true);
+      
+      const response = await trainingAPI.getModelDetails(model.name);
+      setModelDetails(response.data);
+    } catch (error) {
+      onNotification({
+        type: 'error',
+        title: 'Failed to Load Details',
+        message: error.response?.data?.detail || 'Failed to load model details'
+      });
+      setModelDetails({
+        name: model.name,
+        type: model.type,
+        size: 'N/A',
+        accuracy: 'N/A',
+        training_time: 'N/A',
+        error: 'Could not load detailed metrics'
+      });
+    }
+  };
+
+  const handleDeleteModel = async (modelName) => {
+    if (!confirm(`Are you sure you want to delete model "${modelName}"? This action cannot be undone.`)) {
+      return;
+    }
+    
+    try {
+      await trainingAPI.deleteModel(modelName);
+      
+      onNotification({
+        type: 'success',
+        title: 'Model Deleted',
+        message: `Model ${modelName} has been deleted successfully`
+      });
+      
+      // Refresh the models list
+      await loadModels();
+    } catch (error) {
+      onNotification({
+        type: 'error',
+        title: 'Delete Failed',
+        message: error.response?.data?.detail || 'Failed to delete model'
       });
     }
   };
@@ -841,13 +921,23 @@ const ModelTraining = ({ onNotification }) => {
                       secondary={`Type: ${model.type} • Created: ${new Date(model.createdAt).toLocaleString()}`}
                     />
                     <ListItemSecondaryAction>
-                      <IconButton onClick={() => console.log('Download', model.name)}>
+                      <IconButton 
+                        onClick={() => handleDownloadModel(model.name)}
+                        title="Download Model"
+                      >
                         <DownloadIcon />
                       </IconButton>
-                      <IconButton onClick={() => console.log('View', model.name)}>
+                      <IconButton 
+                        onClick={() => handleViewModelDetails(model)}
+                        title="View Model Details"
+                      >
                         <ViewIcon />
                       </IconButton>
-                      <IconButton onClick={() => console.log('Delete', model.name)} color="error">
+                      <IconButton 
+                        onClick={() => handleDeleteModel(model.name)} 
+                        color="error"
+                        title="Delete Model"
+                      >
                         <DeleteIcon />
                       </IconButton>
                     </ListItemSecondaryAction>
@@ -953,6 +1043,207 @@ const ModelTraining = ({ onNotification }) => {
           >
             {isStartingTraining ? 'Starting...' : 'Start Training'}
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Model Details Dialog */}
+      <Dialog
+        open={modelDetailsDialog}
+        onClose={() => setModelDetailsDialog(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          Model Details: {selectedModelForDetails?.name}
+        </DialogTitle>
+        <DialogContent>
+          {modelDetails ? (
+            <Grid container spacing={3}>
+              {/* Basic Information */}
+              <Grid item xs={12}>
+                <Card>
+                  <CardContent>
+                    <Typography variant="h6" gutterBottom>
+                      Basic Information
+                    </Typography>
+                    <Table size="small">
+                      <TableBody>
+                        <TableRow>
+                          <TableCell><strong>Model Name</strong></TableCell>
+                          <TableCell>{modelDetails.name}</TableCell>
+                        </TableRow>
+                        <TableRow>
+                          <TableCell><strong>Model Type</strong></TableCell>
+                          <TableCell>
+                            <Chip 
+                              label={DATASET_TYPE_INFO[modelDetails.type]?.name || modelDetails.type}
+                              color={getDatasetTypeColor(modelDetails.type)}
+                              size="small"
+                            />
+                          </TableCell>
+                        </TableRow>
+                        <TableRow>
+                          <TableCell><strong>Created</strong></TableCell>
+                          <TableCell>{new Date(modelDetails.created_at || selectedModelForDetails?.createdAt).toLocaleString()}</TableCell>
+                        </TableRow>
+                        <TableRow>
+                          <TableCell><strong>Model Size</strong></TableCell>
+                          <TableCell>{modelDetails.size || 'N/A'}</TableCell>
+                        </TableRow>
+                        <TableRow>
+                          <TableCell><strong>Base Model</strong></TableCell>
+                          <TableCell>{modelDetails.base_model || 'N/A'}</TableCell>
+                        </TableRow>
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+              </Grid>
+
+              {/* Training Configuration */}
+              {modelDetails.training_config && (
+                <Grid item xs={12} md={6}>
+                  <Card>
+                    <CardContent>
+                      <Typography variant="h6" gutterBottom>
+                        Training Configuration
+                      </Typography>
+                      <Table size="small">
+                        <TableBody>
+                          <TableRow>
+                            <TableCell><strong>Epochs</strong></TableCell>
+                            <TableCell>{modelDetails.training_config.epochs || 'N/A'}</TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell><strong>Batch Size</strong></TableCell>
+                            <TableCell>{modelDetails.training_config.batch_size || 'N/A'}</TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell><strong>Learning Rate</strong></TableCell>
+                            <TableCell>{modelDetails.training_config.learning_rate || 'N/A'}</TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell><strong>Image Size</strong></TableCell>
+                            <TableCell>{modelDetails.training_config.image_size || 'N/A'}</TableCell>
+                          </TableRow>
+                        </TableBody>
+                      </Table>
+                    </CardContent>
+                  </Card>
+                </Grid>
+              )}
+
+              {/* Performance Metrics */}
+              {modelDetails.metrics && (
+                <Grid item xs={12} md={6}>
+                  <Card>
+                    <CardContent>
+                      <Typography variant="h6" gutterBottom>
+                        Performance Metrics
+                      </Typography>
+                      <Table size="small">
+                        <TableBody>
+                          <TableRow>
+                            <TableCell><strong>Training Time</strong></TableCell>
+                            <TableCell>{modelDetails.metrics.training_time || 'N/A'}</TableCell>
+                          </TableRow>
+                          <TableRow>
+                            <TableCell><strong>Final Loss</strong></TableCell>
+                            <TableCell>{modelDetails.metrics.final_loss?.toFixed(4) || 'N/A'}</TableCell>
+                          </TableRow>
+                          {modelDetails.type === 'object_detection' && modelDetails.metrics.mAP && (
+                            <TableRow>
+                              <TableCell><strong>mAP@0.5</strong></TableCell>
+                              <TableCell>{(modelDetails.metrics.mAP * 100).toFixed(1)}%</TableCell>
+                            </TableRow>
+                          )}
+                          {(modelDetails.type === 'image_classification' || modelDetails.type === 'vision_llm') && modelDetails.metrics.accuracy && (
+                            <TableRow>
+                              <TableCell><strong>Accuracy</strong></TableCell>
+                              <TableCell>{(modelDetails.metrics.accuracy * 100).toFixed(1)}%</TableCell>
+                            </TableRow>
+                          )}
+                          <TableRow>
+                            <TableCell><strong>Dataset Used</strong></TableCell>
+                            <TableCell>{modelDetails.dataset_name || 'N/A'}</TableCell>
+                          </TableRow>
+                        </TableBody>
+                      </Table>
+                    </CardContent>
+                  </Card>
+                </Grid>
+              )}
+
+              {/* Files Information */}
+              <Grid item xs={12}>
+                <Card>
+                  <CardContent>
+                    <Typography variant="h6" gutterBottom>
+                      Model Files
+                    </Typography>
+                    <List dense>
+                      <ListItem>
+                        <ListItemText
+                          primary="Model Weights"
+                          secondary={`${modelDetails.name}.pt - PyTorch model file`}
+                        />
+                      </ListItem>
+                      <ListItem>
+                        <ListItemText
+                          primary="Configuration"
+                          secondary="config.yaml - Training configuration"
+                        />
+                      </ListItem>
+                      <ListItem>
+                        <ListItemText
+                          primary="Metadata"
+                          secondary="metadata.json - Model metadata and metrics"
+                        />
+                      </ListItem>
+                    </List>
+                  </CardContent>
+                </Card>
+              </Grid>
+
+              {/* Error Message */}
+              {modelDetails.error && (
+                <Grid item xs={12}>
+                  <Alert severity="warning">
+                    {modelDetails.error}
+                  </Alert>
+                </Grid>
+              )}
+            </Grid>
+          ) : (
+            <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+              <CircularProgress />
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setModelDetailsDialog(false)}>Close</Button>
+          {selectedModelForDetails && (
+            <>
+              <Button
+                startIcon={<DownloadIcon />}
+                onClick={() => handleDownloadModel(selectedModelForDetails.name)}
+                variant="contained"
+              >
+                Download Model
+              </Button>
+              <Button
+                startIcon={<DeleteIcon />}
+                onClick={() => {
+                  setModelDetailsDialog(false);
+                  handleDeleteModel(selectedModelForDetails.name);
+                }}
+                color="error"
+                variant="outlined"
+              >
+                Delete Model
+              </Button>
+            </>
+          )}
         </DialogActions>
       </Dialog>
     </Box>

@@ -152,6 +152,12 @@ export const trainingAPI = {
     apiClient.post(`/training/${jobId}/save`, { model_name: modelName }),
   loadModel: (modelName) => apiClient.post(`/models/${modelName}/load`),
   deleteModel: (modelName) => apiClient.delete(`/models/${modelName}`),
+  downloadModel: (modelName) => 
+    apiClient.get(`/models/${modelName}/download`, { responseType: 'blob' }),
+  getModelDetails: (modelName) => 
+    apiClient.get(`/models/${modelName}/details`),
+  exportModel: (modelName, format = 'pytorch') => 
+    apiClient.get(`/models/${modelName}/export/${format}`, { responseType: 'blob' }),
   
   // Model evaluation
   evaluateModel: (modelName, datasetId) => 
