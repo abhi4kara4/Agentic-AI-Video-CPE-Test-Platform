@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, WebSocket, WebSocketDisconnect, Form
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
@@ -1938,6 +1938,7 @@ async def test_single_model(model_name: str, prompt: str = "Describe what you se
             "model": model_name,
             "model_type": model_type,
             "frame_path": str(frame_path),
+            "image_url": f"/test/image/{test_id}/test_frame.jpg",
             "detections": detections,
             "detection_count": len(detections),
             "processing_time_seconds": processing_time,
@@ -1963,6 +1964,7 @@ async def test_single_model(model_name: str, prompt: str = "Describe what you se
             "model": model_name,
             "model_type": model_type,
             "frame_path": str(frame_path),
+            "image_url": f"/test/image/{test_id}/test_frame.jpg",
             "predictions": predictions,
             "top_prediction": predictions[0],
             "processing_time_seconds": processing_time,
@@ -1983,6 +1985,7 @@ async def test_single_model(model_name: str, prompt: str = "Describe what you se
             "model": model_name,
             "model_type": model_type,
             "frame_path": str(frame_path),
+            "image_url": f"/test/image/{test_id}/test_frame.jpg",
             "prompt": prompt,
             "response": response,
             "confidence": confidence,
@@ -2054,6 +2057,7 @@ async def test_model_with_upload(
             "model": model_name,
             "model_type": model_type,
             "image_path": str(image_path),
+            "image_url": f"/test/image/{test_id}/uploaded_{file.filename}",
             "input_type": "uploaded_image",
             "detections": detections,
             "detection_count": len(detections),
@@ -2239,6 +2243,24 @@ async def clear_test_history():
     TESTING_DIR.mkdir(exist_ok=True)
     
     return {"status": "success", "message": "Test history cleared"}
+
+
+@app.get("/test/image/{test_id}/{filename}")
+async def get_test_image(test_id: str, filename: str):
+    """Serve test result images"""
+    # Look for the image in various test directories
+    possible_paths = [
+        TESTING_DIR / f"single_test_{test_id}" / filename,
+        TESTING_DIR / f"upload_test_{test_id}" / filename,
+        TESTING_DIR / f"comparison_{test_id}" / filename,
+        TESTING_DIR / f"benchmark_{test_id}" / filename,
+    ]
+    
+    for image_path in possible_paths:
+        if image_path.exists():
+            return FileResponse(str(image_path))
+    
+    raise HTTPException(status_code=404, detail="Test image not found")
 
 
 # WebSocket endpoints

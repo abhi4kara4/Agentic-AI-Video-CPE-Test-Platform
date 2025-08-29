@@ -49,6 +49,221 @@ import {
 } from '@mui/icons-material';
 import { trainingAPI, datasetAPI, wsManager } from '../services/api.jsx';
 import { DATASET_TYPES, DATASET_TYPE_INFO } from '../constants/datasetTypes.js';
+import { 
+  LineChart, 
+  Line, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  Legend, 
+  ResponsiveContainer,
+  AreaChart,
+  Area
+} from 'recharts';
+
+// Training Progress Charts Component
+const TrainingProgressCharts = ({ job }) => {
+  if (!job.metrics || !job.metrics.length) {
+    return (
+      <Alert severity="info">
+        No training metrics data available yet. Metrics will appear as training progresses.
+      </Alert>
+    );
+  }
+
+  // Prepare data for charts
+  const chartData = job.metrics.map((metric, index) => ({
+    epoch: metric.epoch || index + 1,
+    loss: metric.loss,
+    accuracy: metric.accuracy,
+    mAP: metric.mAP,
+    val_loss: metric.val_loss,
+    val_accuracy: metric.val_accuracy,
+    val_mAP: metric.val_mAP,
+    learning_rate: metric.learning_rate,
+    time: new Date(metric.timestamp).getTime()
+  }));
+
+  return (
+    <Grid container spacing={3}>
+      {/* Loss Chart */}
+      <Grid item xs={12} md={6}>
+        <Card>
+          <CardContent>
+            <Typography variant="h6" gutterBottom>
+              Training Loss
+            </Typography>
+            <ResponsiveContainer width="100%" height={250}>
+              <LineChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="epoch" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Line 
+                  type="monotone" 
+                  dataKey="loss" 
+                  stroke="#1976d2" 
+                  strokeWidth={2}
+                  name="Training Loss"
+                />
+                {chartData.some(d => d.val_loss !== undefined) && (
+                  <Line 
+                    type="monotone" 
+                    dataKey="val_loss" 
+                    stroke="#dc004e" 
+                    strokeWidth={2}
+                    strokeDasharray="5 5"
+                    name="Validation Loss"
+                  />
+                )}
+              </LineChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      </Grid>
+
+      {/* Accuracy/mAP Chart */}
+      <Grid item xs={12} md={6}>
+        <Card>
+          <CardContent>
+            <Typography variant="h6" gutterBottom>
+              {job.config?.datasetType === 'object_detection' ? 'Mean Average Precision (mAP)' : 'Accuracy'}
+            </Typography>
+            <ResponsiveContainer width="100%" height={250}>
+              <AreaChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="epoch" />
+                <YAxis domain={[0, 1]} />
+                <Tooltip formatter={(value) => `${(value * 100).toFixed(1)}%`} />
+                <Legend />
+                {job.config?.datasetType === 'object_detection' ? (
+                  <>
+                    <Area 
+                      type="monotone" 
+                      dataKey="mAP" 
+                      stackId="1"
+                      stroke="#4caf50" 
+                      fill="#4caf50" 
+                      fillOpacity={0.3}
+                      name="mAP"
+                    />
+                    {chartData.some(d => d.val_mAP !== undefined) && (
+                      <Area 
+                        type="monotone" 
+                        dataKey="val_mAP" 
+                        stackId="2"
+                        stroke="#ff9800" 
+                        fill="#ff9800" 
+                        fillOpacity={0.3}
+                        strokeDasharray="5 5"
+                        name="Validation mAP"
+                      />
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <Area 
+                      type="monotone" 
+                      dataKey="accuracy" 
+                      stackId="1"
+                      stroke="#4caf50" 
+                      fill="#4caf50" 
+                      fillOpacity={0.3}
+                      name="Training Accuracy"
+                    />
+                    {chartData.some(d => d.val_accuracy !== undefined) && (
+                      <Area 
+                        type="monotone" 
+                        dataKey="val_accuracy" 
+                        stackId="2"
+                        stroke="#ff9800" 
+                        fill="#ff9800" 
+                        fillOpacity={0.3}
+                        strokeDasharray="5 5"
+                        name="Validation Accuracy"
+                      />
+                    )}
+                  </>
+                )}
+              </AreaChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      </Grid>
+
+      {/* Learning Rate Chart */}
+      {chartData.some(d => d.learning_rate !== undefined) && (
+        <Grid item xs={12} md={6}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                Learning Rate Schedule
+              </Typography>
+              <ResponsiveContainer width="100%" height={250}>
+                <LineChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="epoch" />
+                  <YAxis scale="log" domain={['dataMin', 'dataMax']} />
+                  <Tooltip formatter={(value) => value.toExponential(3)} />
+                  <Legend />
+                  <Line 
+                    type="monotone" 
+                    dataKey="learning_rate" 
+                    stroke="#9c27b0" 
+                    strokeWidth={2}
+                    name="Learning Rate"
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        </Grid>
+      )}
+
+      {/* Training Time Chart */}
+      <Grid item xs={12} md={6}>
+        <Card>
+          <CardContent>
+            <Typography variant="h6" gutterBottom>
+              Training Progress Timeline
+            </Typography>
+            <ResponsiveContainer width="100%" height={250}>
+              <LineChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis 
+                  dataKey="time" 
+                  type="number"
+                  scale="time"
+                  domain={['dataMin', 'dataMax']}
+                  tickFormatter={(time) => new Date(time).toLocaleTimeString()}
+                />
+                <YAxis />
+                <Tooltip 
+                  labelFormatter={(time) => new Date(time).toLocaleString()}
+                  formatter={(value, name) => [
+                    name === 'loss' ? value?.toFixed(4) : `${(value * 100)?.toFixed(1)}%`,
+                    name
+                  ]}
+                />
+                <Legend />
+                <Line 
+                  type="monotone" 
+                  dataKey="loss" 
+                  stroke="#1976d2" 
+                  strokeWidth={2}
+                  name="Loss"
+                  yAxisId="loss"
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      </Grid>
+    </Grid>
+  );
+};
 
 const ModelTraining = ({ onNotification }) => {
   const [activeTab, setActiveTab] = useState(0);
@@ -527,6 +742,21 @@ const ModelTraining = ({ onNotification }) => {
                                   )}
                                 </Box>
                               </Box>
+                            )}
+
+                            {/* Training Progress Charts - Expandable */}
+                            {(job.status === 'running' || job.status === 'completed') && job.metrics && job.metrics.length > 0 && (
+                              <Accordion sx={{ mt: 2, mb: 2 }}>
+                                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                                  <Typography variant="subtitle2">
+                                    <MetricsIcon sx={{ mr: 1, verticalAlign: 'bottom' }} />
+                                    Training Progress Charts ({job.metrics.length} data points)
+                                  </Typography>
+                                </AccordionSummary>
+                                <AccordionDetails>
+                                  <TrainingProgressCharts job={job} />
+                                </AccordionDetails>
+                              </Accordion>
                             )}
 
                             {/* Action Buttons */}
