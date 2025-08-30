@@ -327,6 +327,13 @@ const DatasetCreation = ({ onNotification }) => {
             message: 'Images refreshed from session data'
           });
         }
+      } else {
+        onNotification({
+          type: 'info',
+          title: 'No Images Found',
+          message: 'No images found in the dataset'
+        });
+      }
       
     } catch (error) {
       console.error('Failed to refresh images:', error);
