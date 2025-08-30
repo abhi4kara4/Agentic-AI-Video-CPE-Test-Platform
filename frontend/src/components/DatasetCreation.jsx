@@ -296,13 +296,13 @@ const DatasetCreation = ({ onNotification }) => {
       const images = response.data?.images || [];
       
       if (images.length > 0) {
-        // Create image objects with actual backend filenames
+        // Create image objects with actual backend filenames and structure
         const refreshedImages = images.map((img, index) => ({
           id: Date.now() + index,
-          path: img.path || img.filename,
+          path: img.path,
           filename: img.filename,
-          timestamp: img.timestamp || new Date().toISOString(),
-          labels: img.labels,
+          timestamp: new Date().toISOString(),
+          labels: img.annotation, // Backend returns annotation object, not labels
           thumbnail: null // Will load from backend URL
         }));
         
