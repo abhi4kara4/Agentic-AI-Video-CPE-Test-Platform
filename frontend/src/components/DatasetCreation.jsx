@@ -238,7 +238,7 @@ const DatasetCreation = ({ onNotification }) => {
         
         // Try to fetch the first image to see if backend is working
         try {
-          const response = await fetch(testUrl, { method: 'HEAD' });
+          const response = await fetch(testUrl, { method: 'GET' });
           if (!response.ok) {
             throw new Error('Backend images not accessible');
           }
@@ -290,7 +290,7 @@ const DatasetCreation = ({ onNotification }) => {
         const testUrl = videoAPI.getImageUrl(refreshedImages[0].filename);
         
         try {
-          const response = await fetch(testUrl, { method: 'HEAD' });
+          const response = await fetch(testUrl, { method: 'GET' });
           if (response.ok) {
             onNotification({
               type: 'success',
