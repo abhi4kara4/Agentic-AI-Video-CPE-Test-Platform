@@ -226,7 +226,13 @@ async def get_screenshot_image(filename: str):
     return FileResponse(
         path=str(file_path),
         media_type="image/jpeg",
-        filename=filename
+        filename=filename,
+        headers={
+            "Access-Control-Allow-Origin": "http://localhost:3000",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Credentials": "true"
+        }
     )
 
 
@@ -250,7 +256,13 @@ async def get_dataset_image(dataset_name: str, filename: str):
     return FileResponse(
         path=str(image_path),
         media_type="image/jpeg",
-        filename=filename
+        filename=filename,
+        headers={
+            "Access-Control-Allow-Origin": "http://localhost:3000",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Credentials": "true"
+        }
     )
 
 
@@ -2282,7 +2294,15 @@ async def get_test_image(test_id: str, filename: str):
     
     for image_path in possible_paths:
         if image_path.exists():
-            return FileResponse(str(image_path))
+            return FileResponse(
+                str(image_path),
+                headers={
+                    "Access-Control-Allow-Origin": "http://localhost:3000",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "*",
+                    "Access-Control-Allow-Credentials": "true"
+                }
+            )
     
     raise HTTPException(status_code=404, detail="Test image not found")
 

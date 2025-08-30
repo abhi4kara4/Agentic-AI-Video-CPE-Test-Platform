@@ -295,6 +295,8 @@ const DatasetCreation = ({ onNotification }) => {
       const response = await datasetAPI.listDatasetImages(currentDataset.name);
       const images = response.data?.images || [];
       
+      console.log('Backend images response:', images); // Debug logging
+      
       if (images.length > 0) {
         // Create image objects with actual backend filenames and structure
         const refreshedImages = images.map((img, index) => ({
@@ -312,6 +314,8 @@ const DatasetCreation = ({ onNotification }) => {
           } : null,
           thumbnail: null // Will load from backend URL
         }));
+        
+        console.log('Transformed images:', refreshedImages); // Debug logging
         
         setCapturedImages(refreshedImages);
         
