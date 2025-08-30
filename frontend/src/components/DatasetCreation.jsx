@@ -682,8 +682,8 @@ const DatasetCreation = ({ onNotification }) => {
       
       const newImage = {
         id: Date.now(),
-        path: response.data.screenshot_path || `screenshot_${Date.now()}.jpg`,
-        filename: response.data.filename || `screenshot_${Date.now()}.jpg`,
+        path: response.data.screenshot_path || `capture_${Date.now()}.jpg`,
+        filename: response.data.filename || `capture_${Date.now()}.jpg`,
         timestamp: response.data.timestamp || new Date().toISOString(),
         labels: null,
         thumbnail: thumbnailData
