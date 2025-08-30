@@ -302,7 +302,14 @@ const DatasetCreation = ({ onNotification }) => {
           path: img.path,
           filename: img.filename,
           timestamp: new Date().toISOString(),
-          labels: img.annotation, // Backend returns annotation object, not labels
+          labels: img.annotation ? {
+            // Transform backend annotation structure to frontend labels structure
+            boundingBoxes: img.annotation.bounding_boxes || [],
+            notes: img.annotation.notes || '',
+            augmentationOptions: img.annotation.augmentation_options || {},
+            // Keep original annotation for reference
+            _originalAnnotation: img.annotation
+          } : null,
           thumbnail: null // Will load from backend URL
         }));
         
@@ -2104,6 +2111,7 @@ const DatasetCreation = ({ onNotification }) => {
                   copiedAnnotations={copiedAnnotations}
                   onCopyAnnotations={handleCopyAnnotations}
                   showCopyPaste={true}
+                  imageName={selectedImage?.filename || selectedImage?.path?.split('/').pop() || 'unknown'}
                 />
               )}
               

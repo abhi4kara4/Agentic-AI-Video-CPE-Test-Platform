@@ -34,7 +34,8 @@ const ObjectDetectionLabeler = ({
   onLabelsChange, 
   copiedAnnotations,
   onCopyAnnotations,
-  showCopyPaste = false 
+  showCopyPaste = false,
+  imageName = null
 }) => {
   const canvasRef = useRef(null);
   const imageRef = useRef(null); // Cache the loaded image
@@ -371,7 +372,7 @@ const ObjectDetectionLabeler = ({
       imageInfo: {
         width: canvasSize.width,
         height: canvasSize.height,
-        imageName: image?.name || image?.filename || 'unknown'
+        imageName: imageName || image?.name || image?.filename || 'unknown'
       }
     };
     
