@@ -297,36 +297,36 @@ const DatasetCreation = ({ onNotification }) => {
         // Test if backend images are accessible by trying to load the first one
         if (refreshedImages.length > 0 && refreshedImages[0].filename) {
           const testUrl = videoAPI.getDatasetImageUrl(currentDataset.name, refreshedImages[0].filename);
-        
-        try {
-          const response = await fetch(testUrl, { method: 'GET' });
-          if (response.ok) {
+          
+          try {
+            const response = await fetch(testUrl, { method: 'GET' });
+            if (response.ok) {
+              onNotification({
+                type: 'success',
+                title: 'Images Refreshed',
+                message: `${refreshedImages.length} images refreshed from backend storage`
+              });
+            } else {
+              onNotification({
+                type: 'warning',
+                title: 'Images Refreshed',
+                message: 'Images refreshed but backend might not be fully ready yet'
+              });
+            }
+          } catch (error) {
             onNotification({
-              type: 'success',
+              type: 'info',
               title: 'Images Refreshed',
-              message: `${refreshedImages.length} images refreshed from backend storage`
-            });
-          } else {
-            onNotification({
-              type: 'warning',
-              title: 'Images Refreshed',
-              message: 'Images refreshed but backend might not be fully ready yet'
+              message: 'Images refreshed. They will load when backend is ready.'
             });
           }
-        } catch (error) {
+        } else {
           onNotification({
-            type: 'info',
+            type: 'success',
             title: 'Images Refreshed',
-            message: 'Images refreshed. They will load when backend is ready.'
+            message: 'Images refreshed from session data'
           });
         }
-      } else {
-        onNotification({
-          type: 'success',
-          title: 'Images Refreshed',
-          message: 'Images refreshed from session data'
-        });
-      }
       
     } catch (error) {
       console.error('Failed to refresh images:', error);
