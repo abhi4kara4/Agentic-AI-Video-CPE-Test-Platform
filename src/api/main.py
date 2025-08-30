@@ -230,6 +230,30 @@ async def get_screenshot_image(filename: str):
     )
 
 
+@app.get("/datasets/{dataset_name}/images/{filename}")
+async def get_dataset_image(dataset_name: str, filename: str):
+    """Serve an image file from a dataset"""
+    from fastapi.responses import FileResponse
+    
+    # Construct path to dataset image
+    dataset_dir = DATASETS_DIR / dataset_name
+    image_path = dataset_dir / "images" / filename
+    
+    # Check if dataset exists
+    if not dataset_dir.exists():
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    
+    # Check if image file exists
+    if not image_path.exists() or not image_path.is_file():
+        raise HTTPException(status_code=404, detail="Image not found")
+    
+    return FileResponse(
+        path=str(image_path),
+        media_type="image/jpeg",
+        filename=filename
+    )
+
+
 @app.get("/video/info")
 async def video_info():
     """Get video capture information"""

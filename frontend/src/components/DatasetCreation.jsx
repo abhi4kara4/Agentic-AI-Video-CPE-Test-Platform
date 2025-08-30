@@ -308,6 +308,9 @@ const DatasetCreation = ({ onNotification }) => {
         
         setCapturedImages(refreshedImages);
         
+        // Update session storage with refreshed images
+        saveCapturedImages(refreshedImages);
+        
         // Test if backend images are accessible by trying to load the first one
         if (refreshedImages.length > 0 && refreshedImages[0].filename) {
           const testUrl = videoAPI.getDatasetImageUrl(currentDataset.name, refreshedImages[0].filename);
