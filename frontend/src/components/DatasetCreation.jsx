@@ -50,6 +50,12 @@ import {
   Refresh as RefreshIcon,
   DragHandle as DragHandleIcon,
   RestartAlt as ResetIcon,
+  ContentCopy as CopyIcon,
+  ContentPaste as PasteIcon,
+  SelectAll as SelectAllIcon,
+  CheckBoxOutlineBlank as UncheckedIcon,
+  CheckBox as CheckedIcon,
+  Deselect as DeselectIcon,
 } from '@mui/icons-material';
 import { videoAPI, deviceAPI, datasetAPI } from '../services/api.jsx';
 import { useDatasetCreation } from '../context/DatasetCreationContext.jsx';
@@ -185,6 +191,12 @@ const DatasetCreation = ({ onNotification }) => {
     },
     notes: ''
   });
+
+  // Copy/Paste and Multi-selection state
+  const [copiedAnnotations, setCopiedAnnotations] = useState(null);
+  const [selectedImages, setSelectedImages] = useState(new Set());
+  const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
+  const [showBulkPasteDialog, setShowBulkPasteDialog] = useState(false);
 
   // Load datasets on component mount
   useEffect(() => {
@@ -996,6 +1008,115 @@ const DatasetCreation = ({ onNotification }) => {
     }
   };
 
+  // Copy/Paste and Multi-selection functions
+  const handleCopyAnnotations = (annotations) => {
+    setCopiedAnnotations(annotations);
+    onNotification({
+      type: 'success',
+      title: 'Annotations Copied',
+      message: `Copied ${annotations.boundingBoxes?.length || 0} bounding boxes from ${annotations.imageInfo?.imageName || 'image'}`
+    });
+  };
+
+  const handleImageSelect = (imageId, isSelected) => {
+    setSelectedImages(prev => {
+      const newSet = new Set(prev);
+      if (isSelected) {
+        newSet.add(imageId);
+      } else {
+        newSet.delete(imageId);
+      }
+      return newSet;
+    });
+  };
+
+  const handleSelectAllImages = () => {
+    if (selectedImages.size === capturedImages.length) {
+      setSelectedImages(new Set()); // Deselect all
+    } else {
+      setSelectedImages(new Set(capturedImages.map(img => img.id))); // Select all
+    }
+  };
+
+  const handleBulkPasteAnnotations = async () => {
+    if (!copiedAnnotations || selectedImages.size === 0) return;
+
+    try {
+      setIsGeneratingDataset(true); // Reuse existing loading state
+      
+      const imagesToUpdate = capturedImages.filter(img => selectedImages.has(img.id));
+      let successCount = 0;
+      let failCount = 0;
+
+      for (const image of imagesToUpdate) {
+        try {
+          // Create label data with pasted annotations
+          const labelData = {
+            boundingBoxes: copiedAnnotations.boundingBoxes.map(box => ({
+              ...box,
+              id: Date.now() + Math.random() // New unique ID
+            }))
+          };
+
+          // Save to backend
+          await datasetAPI.labelImage(
+            currentDataset.name,
+            image.path.split('/').pop(),
+            'other', // Default screen type for bulk operations
+            `Bulk pasted from ${copiedAnnotations.imageInfo?.imageName || 'source image'}`,
+            labelData
+          );
+
+          successCount++;
+        } catch (error) {
+          console.error(`Failed to paste annotations to image ${image.filename}:`, error);
+          failCount++;
+        }
+      }
+
+      // Update local state for successful updates
+      const updatedImages = capturedImages.map(img => {
+        if (selectedImages.has(img.id)) {
+          return {
+            ...img,
+            labels: {
+              ...currentLabels,
+              boundingBoxes: copiedAnnotations.boundingBoxes.map(box => ({
+                ...box,
+                id: Date.now() + Math.random()
+              })),
+              notes: `Bulk pasted from ${copiedAnnotations.imageInfo?.imageName || 'source image'}`
+            },
+            datasetType: config.datasetType
+          };
+        }
+        return img;
+      });
+      setCapturedImages(updatedImages);
+
+      // Clear selections
+      setSelectedImages(new Set());
+      setIsMultiSelectMode(false);
+      setShowBulkPasteDialog(false);
+
+      const totalProcessed = successCount + failCount;
+      onNotification({
+        type: successCount === totalProcessed ? 'success' : 'warning',
+        title: 'Bulk Paste Complete',
+        message: `Successfully pasted annotations to ${successCount} images${failCount > 0 ? `, ${failCount} failed` : ''}`
+      });
+
+    } catch (error) {
+      onNotification({
+        type: 'error',
+        title: 'Bulk Paste Failed',
+        message: 'Failed to paste annotations to selected images'
+      });
+    } finally {
+      setIsGeneratingDataset(false);
+    }
+  };
+
   const steps = [
     'Configure Platform',
     'Start Video Stream',
@@ -1491,6 +1612,72 @@ const DatasetCreation = ({ onNotification }) => {
                 </Box>
               </Box>
 
+              {/* Copy/Paste and Multi-Select Controls - Only show for Object Detection */}
+              {config.datasetType === DATASET_TYPES.OBJECT_DETECTION && capturedImages.length > 0 && (
+                <Box sx={{ mb: 2, p: 1, bgcolor: 'grey.50', borderRadius: 1 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                      <Button
+                        size="small"
+                        variant={isMultiSelectMode ? "contained" : "outlined"}
+                        startIcon={isMultiSelectMode ? <DeselectIcon /> : <SelectAllIcon />}
+                        onClick={() => {
+                          setIsMultiSelectMode(!isMultiSelectMode);
+                          if (isMultiSelectMode) {
+                            setSelectedImages(new Set()); // Clear selections when exiting multi-select
+                          }
+                        }}
+                      >
+                        {isMultiSelectMode ? 'Exit Select' : 'Multi-Select'}
+                      </Button>
+                      
+                      {isMultiSelectMode && (
+                        <>
+                          <Button
+                            size="small"
+                            startIcon={<CheckedIcon />}
+                            onClick={handleSelectAllImages}
+                            disabled={capturedImages.length === 0}
+                          >
+                            {selectedImages.size === capturedImages.length ? 'Deselect All' : 'Select All'}
+                          </Button>
+                          
+                          {selectedImages.size > 0 && (
+                            <Chip 
+                              label={`${selectedImages.size} selected`}
+                              size="small"
+                              color="primary"
+                            />
+                          )}
+                        </>
+                      )}
+                    </Box>
+
+                    <Box sx={{ display: 'flex', gap: 1 }}>
+                      <Button
+                        size="small"
+                        startIcon={<PasteIcon />}
+                        onClick={() => setShowBulkPasteDialog(true)}
+                        disabled={!copiedAnnotations || selectedImages.size === 0 || !isMultiSelectMode}
+                        color="secondary"
+                      >
+                        Paste to Selected ({selectedImages.size})
+                      </Button>
+                      
+                      {copiedAnnotations && (
+                        <Chip 
+                          label={`${copiedAnnotations.boundingBoxes?.length || 0} boxes copied`}
+                          size="small"
+                          color="success"
+                          variant="outlined"
+                          icon={<CopyIcon />}
+                        />
+                      )}
+                    </Box>
+                  </Box>
+                </Box>
+              )}
+
               {capturedImages.length === 0 ? (
                 <Box
                   sx={{
@@ -1536,10 +1723,18 @@ const DatasetCreation = ({ onNotification }) => {
                           <Card
                             sx={{
                               cursor: 'pointer',
-                              border: image.labels ? '2px solid' : '1px solid',
-                              borderColor: image.labels ? 'success.main' : 'divider',
+                              border: selectedImages.has(image.id) ? '3px solid' : 
+                                      image.labels ? '2px solid' : '1px solid',
+                              borderColor: selectedImages.has(image.id) ? 'primary.main' :
+                                          image.labels ? 'success.main' : 'divider',
                               '&:hover': { boxShadow: 2 },
                               height: '100%',
+                              opacity: isMultiSelectMode && !selectedImages.has(image.id) ? 0.7 : 1,
+                            }}
+                            onClick={() => {
+                              if (isMultiSelectMode) {
+                                handleImageSelect(image.id, !selectedImages.has(image.id));
+                              }
                             }}
                           >
                             <Box
@@ -1553,7 +1748,48 @@ const DatasetCreation = ({ onNotification }) => {
                               backgroundRepeat: 'no-repeat',
                             }}
                           >
-                            {image.labels && (
+                            {/* Selection checkbox in multi-select mode */}
+                            {isMultiSelectMode && (
+                              <IconButton
+                                size="small"
+                                sx={{ 
+                                  position: 'absolute', 
+                                  top: 4, 
+                                  left: 4,
+                                  bgcolor: 'rgba(255, 255, 255, 0.9)',
+                                  '&:hover': { bgcolor: 'rgba(255, 255, 255, 1)' }
+                                }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleImageSelect(image.id, !selectedImages.has(image.id));
+                                }}
+                              >
+                                {selectedImages.has(image.id) ? 
+                                  <CheckedIcon color="primary" /> : 
+                                  <UncheckedIcon />
+                                }
+                              </IconButton>
+                            )}
+                            
+                            {/* Label indicator */}
+                            {image.labels && !isMultiSelectMode && (
+                              <Chip
+                                label="✓"
+                                color="success"
+                                size="small"
+                                sx={{ 
+                                  position: 'absolute', 
+                                  top: 2, 
+                                  right: 2,
+                                  minWidth: '24px',
+                                  height: '20px',
+                                  fontSize: '12px'
+                                }}
+                              />
+                            )}
+                            
+                            {/* Show both selection and label in multi-select */}
+                            {image.labels && isMultiSelectMode && (
                               <Chip
                                 label="✓"
                                 color="success"
@@ -1573,37 +1809,39 @@ const DatasetCreation = ({ onNotification }) => {
                             <Typography variant="caption" display="block" sx={{ fontSize: '10px', mb: 0.5 }}>
                               {new Date(image.timestamp).toLocaleTimeString()}
                             </Typography>
-                            <Box sx={{ display: 'flex', gap: 0.25, justifyContent: 'center' }}>
-                              <IconButton
-                                size="small"
-                                onClick={() => openLabelingDialog(image)}
-                                title={image.labels ? "Edit Labels" : "Label Image"}
-                                sx={{ padding: '4px' }}
-                              >
-                                {image.labels ? (
-                                  <EditIcon sx={{ fontSize: '16px' }} />
-                                ) : (
-                                  <LabelIcon sx={{ fontSize: '16px' }} />
-                                )}
-                              </IconButton>
-                              <IconButton 
-                                size="small"
-                                onClick={() => handleViewImage(image)}
-                                title="View Image"
-                                sx={{ padding: '4px' }}
-                              >
-                                <ViewIcon sx={{ fontSize: '16px' }} />
-                              </IconButton>
-                              <IconButton 
-                                size="small" 
-                                color="error"
-                                onClick={() => handleDeleteImage(image.id)}
-                                title="Delete Image"
-                                sx={{ padding: '4px' }}
-                              >
-                                <DeleteIcon sx={{ fontSize: '16px' }} />
-                              </IconButton>
-                            </Box>
+                            {!isMultiSelectMode && (
+                              <Box sx={{ display: 'flex', gap: 0.25, justifyContent: 'center' }}>
+                                <IconButton
+                                  size="small"
+                                  onClick={() => openLabelingDialog(image)}
+                                  title={image.labels ? "Edit Labels" : "Label Image"}
+                                  sx={{ padding: '4px' }}
+                                >
+                                  {image.labels ? (
+                                    <EditIcon sx={{ fontSize: '16px' }} />
+                                  ) : (
+                                    <LabelIcon sx={{ fontSize: '16px' }} />
+                                  )}
+                                </IconButton>
+                                <IconButton 
+                                  size="small"
+                                  onClick={() => handleViewImage(image)}
+                                  title="View Image"
+                                  sx={{ padding: '4px' }}
+                                >
+                                  <ViewIcon sx={{ fontSize: '16px' }} />
+                                </IconButton>
+                                <IconButton 
+                                  size="small" 
+                                  color="error"
+                                  onClick={() => handleDeleteImage(image.id)}
+                                  title="Delete Image"
+                                  sx={{ padding: '4px' }}
+                                >
+                                  <DeleteIcon sx={{ fontSize: '16px' }} />
+                                </IconButton>
+                              </Box>
+                            )}
                           </Box>
                         </Card>
                       </Grid>
@@ -1626,15 +1864,27 @@ const DatasetCreation = ({ onNotification }) => {
         fullWidth
       >
         <DialogTitle>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            {config.datasetType && DATASET_TYPE_INFO[config.datasetType] && (
-              <Chip
-                label={`${DATASET_TYPE_INFO[config.datasetType].icon} ${DATASET_TYPE_INFO[config.datasetType].name}`}
-                color="primary"
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              {config.datasetType && DATASET_TYPE_INFO[config.datasetType] && (
+                <Chip
+                  label={`${DATASET_TYPE_INFO[config.datasetType].icon} ${DATASET_TYPE_INFO[config.datasetType].name}`}
+                  color="primary"
+                  variant="outlined"
+                />
+              )}
+              Label Image
+            </Box>
+            
+            {config.datasetType === DATASET_TYPES.OBJECT_DETECTION && copiedAnnotations && (
+              <Chip 
+                label={`${copiedAnnotations.boundingBoxes?.length || 0} boxes copied`}
+                size="small"
+                color="success"
                 variant="outlined"
+                icon={<CopyIcon />}
               />
             )}
-            Label Image
           </Box>
         </DialogTitle>
         
@@ -1686,6 +1936,9 @@ const DatasetCreation = ({ onNotification }) => {
                   image={getImageUrls(selectedImage).fullImageUrl}
                   labels={currentLabels}
                   onLabelsChange={setCurrentLabels}
+                  copiedAnnotations={copiedAnnotations}
+                  onCopyAnnotations={handleCopyAnnotations}
+                  showCopyPaste={true}
                 />
               )}
               
@@ -1835,6 +2088,65 @@ const DatasetCreation = ({ onNotification }) => {
         onSelect={handleDatasetTypeSelection}
         currentConfig={config}
       />
+
+      {/* Bulk Paste Confirmation Dialog */}
+      <Dialog
+        open={showBulkPasteDialog}
+        onClose={() => setShowBulkPasteDialog(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Bulk Paste Annotations</DialogTitle>
+        <DialogContent>
+          <Alert severity="info" sx={{ mb: 2 }}>
+            You are about to paste <strong>{copiedAnnotations?.boundingBoxes?.length || 0} bounding boxes</strong> 
+            to <strong>{selectedImages.size} selected images</strong>.
+          </Alert>
+          
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            This will:
+            • Add the copied annotations to all selected images
+            • Save the changes automatically to your dataset
+            • Allow you to fine-tune each image individually afterwards
+          </Typography>
+          
+          {copiedAnnotations?.imageInfo && (
+            <Box sx={{ p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
+              <Typography variant="subtitle2">Source Image:</Typography>
+              <Typography variant="body2">{copiedAnnotations.imageInfo.imageName}</Typography>
+              <Typography variant="caption" color="text.secondary">
+                {copiedAnnotations.boundingBoxes?.length || 0} bounding boxes
+              </Typography>
+            </Box>
+          )}
+          
+          {isGeneratingDataset && (
+            <Box sx={{ mt: 2 }}>
+              <LinearProgress />
+              <Typography variant="caption" color="text.secondary">
+                Pasting annotations to selected images...
+              </Typography>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button 
+            onClick={() => setShowBulkPasteDialog(false)}
+            disabled={isGeneratingDataset}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleBulkPasteAnnotations}
+            variant="contained"
+            color="secondary"
+            disabled={isGeneratingDataset || selectedImages.size === 0}
+            startIcon={isGeneratingDataset ? <CircularProgress size={16} /> : <PasteIcon />}
+          >
+            {isGeneratingDataset ? 'Pasting...' : `Paste to ${selectedImages.size} Images`}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

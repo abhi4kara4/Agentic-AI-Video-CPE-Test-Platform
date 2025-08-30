@@ -21,12 +21,21 @@ import {
   ZoomOut as ZoomOutIcon,
   CenterFocusStrong as ResetIcon,
   PanTool as PanIcon,
-  Edit as LabelIcon
+  Edit as LabelIcon,
+  ContentCopy as CopyIcon,
+  ContentPaste as PasteIcon
 } from '@mui/icons-material';
 
 import { OBJECT_DETECTION_CLASSES } from '../constants/datasetTypes.js';
 
-const ObjectDetectionLabeler = ({ image, labels, onLabelsChange }) => {
+const ObjectDetectionLabeler = ({ 
+  image, 
+  labels, 
+  onLabelsChange, 
+  copiedAnnotations,
+  onCopyAnnotations,
+  showCopyPaste = false 
+}) => {
   const canvasRef = useRef(null);
   const imageRef = useRef(null); // Cache the loaded image
   const zoomTimeoutRef = useRef(null); // Debounce zoom operations
@@ -354,6 +363,40 @@ const ObjectDetectionLabeler = ({ image, labels, onLabelsChange }) => {
     setInteractionMode(prev => prev === 'label' ? 'pan' : 'label');
   };
 
+  const handleCopyAnnotations = () => {
+    if (boundingBoxes.length === 0) return;
+    
+    const annotationsToCopy = {
+      boundingBoxes: boundingBoxes.map(box => ({ ...box })), // Deep copy
+      imageInfo: {
+        width: canvasSize.width,
+        height: canvasSize.height,
+        imageName: image.name || 'unknown'
+      }
+    };
+    
+    onCopyAnnotations(annotationsToCopy);
+  };
+
+  const handlePasteAnnotations = () => {
+    if (!copiedAnnotations || !copiedAnnotations.boundingBoxes) return;
+    
+    // Generate new IDs for pasted boxes to avoid conflicts
+    const pastedBoxes = copiedAnnotations.boundingBoxes.map(box => ({
+      ...box,
+      id: Date.now() + Math.random() // New unique ID
+    }));
+    
+    setBoundingBoxes(pastedBoxes);
+    
+    // Update labels immediately
+    const updatedLabels = {
+      ...labels,
+      boundingBoxes: pastedBoxes
+    };
+    onLabelsChange(updatedLabels);
+  };
+
   return (
     <Box>
       <Typography variant="h6" gutterBottom>
@@ -404,6 +447,30 @@ const ObjectDetectionLabeler = ({ image, labels, onLabelsChange }) => {
                     <UndoIcon />
                   </IconButton>
                 </Tooltip>
+                {showCopyPaste && (
+                  <>
+                    <Tooltip title="Copy Annotations">
+                      <IconButton 
+                        size="small" 
+                        onClick={handleCopyAnnotations}
+                        disabled={boundingBoxes.length === 0}
+                        color="primary"
+                      >
+                        <CopyIcon />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Paste Annotations">
+                      <IconButton 
+                        size="small" 
+                        onClick={handlePasteAnnotations}
+                        disabled={!copiedAnnotations || !copiedAnnotations.boundingBoxes}
+                        color="secondary"
+                      >
+                        <PasteIcon />
+                      </IconButton>
+                    </Tooltip>
+                  </>
+                )}
               </Box>
             </Box>
             
