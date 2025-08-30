@@ -317,6 +317,13 @@ const DatasetCreation = ({ onNotification }) => {
         
         console.log('Transformed images:', refreshedImages); // Debug logging
         
+        // Debug specific image annotations
+        refreshedImages.forEach((img, index) => {
+          if (img.labels && img.labels.boundingBoxes && img.labels.boundingBoxes.length > 0) {
+            console.log(`Image ${img.filename} has ${img.labels.boundingBoxes.length} bounding boxes:`, img.labels.boundingBoxes);
+          }
+        });
+        
         setCapturedImages(refreshedImages);
         
         // Test if backend images are accessible by trying to load the first one

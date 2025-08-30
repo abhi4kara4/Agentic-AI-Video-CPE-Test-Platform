@@ -47,6 +47,17 @@ const ObjectDetectionLabeler = ({
   const [currentBox, setCurrentBox] = useState(null);
   const [selectedClass, setSelectedClass] = useState('button');
   const [boundingBoxes, setBoundingBoxes] = useState(labels?.boundingBoxes || []);
+  
+  // Debug logging for received labels and update boundingBoxes when labels change
+  useEffect(() => {
+    console.log('ObjectDetectionLabeler received labels:', labels);
+    if (labels?.boundingBoxes) {
+      console.log('Bounding boxes:', labels.boundingBoxes);
+      setBoundingBoxes(labels.boundingBoxes); // Update state when labels change
+    } else {
+      setBoundingBoxes([]); // Clear if no bounding boxes
+    }
+  }, [labels]);
   const [zoom, setZoom] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 }); // Track pan offset
   const [interactionMode, setInteractionMode] = useState('label'); // 'label' or 'pan'
