@@ -144,8 +144,8 @@ const DatasetCreation = ({ onNotification }) => {
   // Generate thumbnail URL for display and full image URL for labeling
   const getImageUrls = (image) => {
     // Always prefer backend URL if filename exists (more reliable after restarts)
-    if (image.filename) {
-      const fullImageUrl = videoAPI.getImageUrl(image.filename);
+    if (image.filename && currentDataset) {
+      const fullImageUrl = videoAPI.getDatasetImageUrl(currentDataset.name, image.filename);
       return {
         thumbnailUrl: fullImageUrl,
         fullImageUrl: fullImageUrl,
@@ -233,8 +233,8 @@ const DatasetCreation = ({ onNotification }) => {
     
     try {
       // Test if backend is accessible by checking first image
-      if (capturedImages.length > 0 && capturedImages[0].filename) {
-        const testUrl = videoAPI.getImageUrl(capturedImages[0].filename);
+      if (capturedImages.length > 0 && capturedImages[0].filename && currentDataset) {
+        const testUrl = videoAPI.getDatasetImageUrl(currentDataset.name, capturedImages[0].filename);
         
         // Try to fetch the first image to see if backend is working
         try {
@@ -286,8 +286,8 @@ const DatasetCreation = ({ onNotification }) => {
       setCapturedImages(refreshedImages);
       
       // Test if backend images are accessible by trying to load the first one
-      if (refreshedImages.length > 0 && refreshedImages[0].filename) {
-        const testUrl = videoAPI.getImageUrl(refreshedImages[0].filename);
+      if (refreshedImages.length > 0 && refreshedImages[0].filename && currentDataset) {
+        const testUrl = videoAPI.getDatasetImageUrl(currentDataset.name, refreshedImages[0].filename);
         
         try {
           const response = await fetch(testUrl, { method: 'GET' });

@@ -45,7 +45,8 @@ export const videoAPI = {
   captureScreenshot: () => apiClient.get('/video/screenshot'),
   getStreamUrl: (deviceId, outlet, resolution) => 
     `${API_BASE_URL}/video/stream?device=${deviceId}&outlet=${outlet}&resolution=${resolution}`,
-  getImageUrl: (filename) => `${API_BASE_URL}/image/${filename}`,
+  getImageUrl: (filename) => `${API_BASE_URL}/images/${filename}`,
+  getDatasetImageUrl: (datasetName, filename) => `${API_BASE_URL}/dataset/${datasetName}/images/${filename}`,
 };
 
 // Device Control API
