@@ -315,9 +315,6 @@ const DatasetCreation = ({ onNotification }) => {
         
         setCapturedImages(refreshedImages);
         
-        // Update session storage with refreshed images
-        saveCapturedImages(refreshedImages);
-        
         // Test if backend images are accessible by trying to load the first one
         if (refreshedImages.length > 0 && refreshedImages[0].filename) {
           const testUrl = videoAPI.getDatasetImageUrl(currentDataset.name, refreshedImages[0].filename);
@@ -1197,12 +1194,17 @@ const DatasetCreation = ({ onNotification }) => {
 
       for (const image of imagesToUpdate) {
         try {
-          // Create label data with pasted annotations
+          // Create label data with pasted annotations (match single save format)
           const labelData = {
-            boundingBoxes: copiedAnnotations.boundingBoxes.map(box => ({
-              ...box,
-              id: Date.now() + Math.random() // New unique ID
-            }))
+            datasetType: config.datasetType,
+            labels: {
+              boundingBoxes: copiedAnnotations.boundingBoxes.map(box => ({
+                ...box,
+                id: Date.now() + Math.random() // New unique ID
+              })),
+              notes: `Bulk pasted from ${copiedAnnotations.imageInfo?.imageName || 'source image'}`
+            },
+            augmentationOptions: config.augmentationOptions
           };
 
           // Save to backend
