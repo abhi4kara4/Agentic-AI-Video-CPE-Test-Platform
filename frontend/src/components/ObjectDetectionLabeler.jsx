@@ -449,25 +449,29 @@ const ObjectDetectionLabeler = ({
                 </Tooltip>
                 {showCopyPaste && (
                   <>
-                    <Tooltip title="Copy Annotations">
-                      <IconButton 
-                        size="small" 
-                        onClick={handleCopyAnnotations}
-                        disabled={boundingBoxes.length === 0}
-                        color="primary"
-                      >
-                        <CopyIcon />
-                      </IconButton>
+                    <Tooltip title={boundingBoxes.length === 0 ? "No annotations to copy" : "Copy Annotations"}>
+                      <span>
+                        <IconButton 
+                          size="small" 
+                          onClick={handleCopyAnnotations}
+                          disabled={boundingBoxes.length === 0}
+                          color="primary"
+                        >
+                          <CopyIcon />
+                        </IconButton>
+                      </span>
                     </Tooltip>
-                    <Tooltip title="Paste Annotations">
-                      <IconButton 
-                        size="small" 
-                        onClick={handlePasteAnnotations}
-                        disabled={!copiedAnnotations || !copiedAnnotations.boundingBoxes}
-                        color="secondary"
-                      >
-                        <PasteIcon />
-                      </IconButton>
+                    <Tooltip title={(!copiedAnnotations || !copiedAnnotations.boundingBoxes) ? "No annotations copied" : "Paste Annotations"}>
+                      <span>
+                        <IconButton 
+                          size="small" 
+                          onClick={handlePasteAnnotations}
+                          disabled={!copiedAnnotations || !copiedAnnotations.boundingBoxes}
+                          color="secondary"
+                        >
+                          <PasteIcon />
+                        </IconButton>
+                      </span>
                     </Tooltip>
                   </>
                 )}
