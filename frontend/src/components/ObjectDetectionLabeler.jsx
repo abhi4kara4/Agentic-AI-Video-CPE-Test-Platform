@@ -378,12 +378,18 @@ const ObjectDetectionLabeler = ({
   const handleCopyAnnotations = () => {
     if (boundingBoxes.length === 0) return;
     
+    console.log('Copy - imageName prop:', imageName);
+    console.log('Copy - image prop:', image);
+    
+    const finalImageName = imageName || image?.name || image?.filename || 'unknown';
+    console.log('Copy - final imageName used:', finalImageName);
+    
     const annotationsToCopy = {
       boundingBoxes: boundingBoxes.map(box => ({ ...box })), // Deep copy
       imageInfo: {
         width: canvasSize.width,
         height: canvasSize.height,
-        imageName: imageName || image?.name || image?.filename || 'unknown'
+        imageName: finalImageName
       }
     };
     
