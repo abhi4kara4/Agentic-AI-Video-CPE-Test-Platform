@@ -371,7 +371,7 @@ const ObjectDetectionLabeler = ({
       imageInfo: {
         width: canvasSize.width,
         height: canvasSize.height,
-        imageName: image.name || 'unknown'
+        imageName: image?.name || image?.filename || 'unknown'
       }
     };
     

@@ -959,7 +959,7 @@ const DatasetCreation = ({ onNotification }) => {
       // Save to backend with enhanced data
       const response = await datasetAPI.labelImage(
         currentDataset.name,
-        selectedImage.path.split('/').pop(),
+        selectedImage.path?.split('/').pop() || selectedImage.filename || 'unknown.jpg',
         screenType,
         currentLabels.notes || '',
         labelData
@@ -1201,7 +1201,7 @@ const DatasetCreation = ({ onNotification }) => {
           // Save to backend
           await datasetAPI.labelImage(
             currentDataset.name,
-            image.path.split('/').pop(),
+            image.path?.split('/').pop() || image.filename || 'unknown.jpg',
             'other', // Default screen type for bulk operations
             `Bulk pasted from ${copiedAnnotations.imageInfo?.imageName || 'source image'}`,
             labelData
