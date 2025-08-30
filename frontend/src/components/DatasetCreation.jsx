@@ -143,18 +143,18 @@ const DatasetCreation = ({ onNotification }) => {
 
   // Generate thumbnail URL for display and full image URL for labeling
   const getImageUrls = (image) => {
-    if (image.thumbnail) {
-      // Fresh capture with thumbnail
-      return {
-        thumbnailUrl: image.thumbnail,
-        fullImageUrl: image.thumbnail, // Use same for now, could be enhanced
-      };
-    } else if (image.filename) {
-      // Restored from session storage, use backend URLs
+    // Always prefer backend URL if filename exists (more reliable after restarts)
+    if (image.filename) {
       const fullImageUrl = videoAPI.getImageUrl(image.filename);
       return {
-        thumbnailUrl: fullImageUrl, // Backend serves full resolution
+        thumbnailUrl: fullImageUrl,
         fullImageUrl: fullImageUrl,
+      };
+    } else if (image.thumbnail) {
+      // Fallback to base64 thumbnail if no filename
+      return {
+        thumbnailUrl: image.thumbnail,
+        fullImageUrl: image.thumbnail,
       };
     }
     return { thumbnailUrl: null, fullImageUrl: null };
@@ -220,7 +220,100 @@ const DatasetCreation = ({ onNotification }) => {
         message: 'Your captured images may not persist between page refreshes due to browser storage limits. Consider exporting your dataset regularly.'
       });
     }
+    
+    // Validate and refresh captured images from previous session
+    if (capturedImages.length > 0) {
+      validateAndRefreshImages();
+    }
   }, []);
+
+  // Validate and refresh images after Docker restart
+  const validateAndRefreshImages = async () => {
+    console.log('Validating and refreshing captured images from previous session');
+    
+    try {
+      // Test if backend is accessible by checking first image
+      if (capturedImages.length > 0 && capturedImages[0].filename) {
+        const testUrl = videoAPI.getImageUrl(capturedImages[0].filename);
+        
+        // Try to fetch the first image to see if backend is working
+        try {
+          const response = await fetch(testUrl, { method: 'HEAD' });
+          if (!response.ok) {
+            throw new Error('Backend images not accessible');
+          }
+        } catch (error) {
+          console.warn('Backend images not accessible after restart, clearing thumbnails');
+          
+          // Clear thumbnails but keep image references
+          const updatedImages = capturedImages.map(img => ({
+            ...img,
+            thumbnail: null, // Clear invalid base64 thumbnails
+          }));
+          
+          setCapturedImages(updatedImages);
+          
+          onNotification({
+            type: 'info',
+            title: 'Session Restored',
+            message: 'Previous session restored. Images are available in backend but thumbnails need to be reloaded.'
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error validating images:', error);
+    }
+  };
+
+  // Reload images from current dataset
+  const reloadImagesFromDataset = async () => {
+    if (!currentDataset) {
+      onNotification({
+        type: 'warning',
+        title: 'No Dataset Selected',
+        message: 'Please select a dataset to reload images from'
+      });
+      return;
+    }
+
+    try {
+      const response = await datasetAPI.getDataset(currentDataset.id);
+      const datasetInfo = response.data;
+      
+      if (datasetInfo.images && datasetInfo.images.length > 0) {
+        // Map backend images to our frontend format
+        const reloadedImages = datasetInfo.images.map((img, index) => ({
+          id: img.id || Date.now() + index,
+          path: img.path || img.filename,
+          filename: img.filename,
+          timestamp: img.timestamp || img.created_at,
+          labels: img.labels || null,
+          thumbnail: null, // Force reload from backend
+        }));
+        
+        setCapturedImages(reloadedImages);
+        
+        onNotification({
+          type: 'success',
+          title: 'Images Reloaded',
+          message: `Reloaded ${reloadedImages.length} images from dataset "${currentDataset.name}"`
+        });
+      } else {
+        onNotification({
+          type: 'info',
+          title: 'No Images Found',
+          message: 'No images found in the current dataset'
+        });
+      }
+    } catch (error) {
+      console.error('Failed to reload images:', error);
+      onNotification({
+        type: 'error',
+        title: 'Reload Failed',
+        message: 'Failed to reload images from dataset'
+      });
+    }
+  };
 
   const loadDatasets = async () => {
     try {
@@ -1608,6 +1701,16 @@ const DatasetCreation = ({ onNotification }) => {
                       size="small" 
                       color="success"
                     />
+                  )}
+                  {capturedImages.length > 0 && capturedImages.some(img => !img.thumbnail && img.filename) && (
+                    <Button
+                      size="small"
+                      startIcon={<RefreshIcon />}
+                      onClick={reloadImagesFromDataset}
+                      variant="outlined"
+                    >
+                      Reload Images
+                    </Button>
                   )}
                 </Box>
               </Box>
