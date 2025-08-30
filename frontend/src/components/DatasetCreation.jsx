@@ -1199,6 +1199,8 @@ const DatasetCreation = ({ onNotification }) => {
     try {
       setIsGeneratingDataset(true); // Reuse existing loading state
       
+      console.log('Bulk paste - copiedAnnotations:', copiedAnnotations);
+      
       const imagesToUpdate = capturedImages.filter(img => selectedImages.has(img.id));
       let successCount = 0;
       let failCount = 0;
@@ -1217,6 +1219,8 @@ const DatasetCreation = ({ onNotification }) => {
             },
             augmentationOptions: config.augmentationOptions
           };
+          
+          console.log(`Bulk paste - sending to backend for ${image.filename}:`, labelData);
 
           // Save to backend
           await datasetAPI.labelImage(
