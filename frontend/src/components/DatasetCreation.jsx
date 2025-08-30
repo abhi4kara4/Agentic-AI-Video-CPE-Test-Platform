@@ -265,29 +265,38 @@ const DatasetCreation = ({ onNotification }) => {
     }
   };
 
-  // Refresh images by clearing thumbnails and forcing backend URL reload
+  // Refresh images by fetching actual filenames from backend dataset
   const reloadImagesFromDataset = async () => {
-    if (capturedImages.length === 0) {
+    if (!currentDataset) {
       onNotification({
-        type: 'info',
-        title: 'No Images to Refresh',
-        message: 'No captured images found to refresh'
+        type: 'error',
+        title: 'No Dataset Selected',
+        message: 'Please select a dataset to refresh images'
       });
       return;
     }
 
     try {
-      // Clear thumbnails to force reload from backend
-      const refreshedImages = capturedImages.map(img => ({
-        ...img,
-        thumbnail: null, // Clear thumbnail to force backend URL usage
-      }));
+      // Fetch actual images from the dataset
+      const response = await datasetAPI.listDatasets();
+      const dataset = response.data?.datasets?.find(d => d.name === currentDataset.name);
       
-      setCapturedImages(refreshedImages);
-      
-      // Test if backend images are accessible by trying to load the first one
-      if (refreshedImages.length > 0 && refreshedImages[0].filename && currentDataset) {
-        const testUrl = videoAPI.getDatasetImageUrl(currentDataset.name, refreshedImages[0].filename);
+      if (dataset && dataset.images && dataset.images.length > 0) {
+        // Create image objects with actual backend filenames
+        const refreshedImages = dataset.images.map((img, index) => ({
+          id: Date.now() + index,
+          path: img.path || `capture_${Date.now()}.jpg`,
+          filename: img.filename || img.path?.split('/').pop(),
+          timestamp: img.timestamp || new Date().toISOString(),
+          labels: img.labels,
+          thumbnail: null // Will load from backend URL
+        }));
+        
+        setCapturedImages(refreshedImages);
+        
+        // Test if backend images are accessible by trying to load the first one
+        if (refreshedImages.length > 0 && refreshedImages[0].filename) {
+          const testUrl = videoAPI.getDatasetImageUrl(currentDataset.name, refreshedImages[0].filename);
         
         try {
           const response = await fetch(testUrl, { method: 'GET' });
