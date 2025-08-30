@@ -85,6 +85,20 @@ const COMMON_APPS = [
   'Sling TV', 'Spotify', 'Pandora', 'Settings'
 ];
 
+// Generate filename format that matches backend: capture_YYYYMMDD_HHMMSS_mmm.jpg
+const generateCaptureFilename = () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  const seconds = String(now.getSeconds()).padStart(2, '0');
+  const milliseconds = String(now.getMilliseconds()).padStart(3, '0');
+  
+  return `capture_${year}${month}${day}_${hours}${minutes}${seconds}_${milliseconds}.jpg`;
+};
+
 const UI_ELEMENTS = [
   'menu', 'button', 'video_player', 'rail', 'list',
   'keyboard', 'dialog', 'spinner', 'carousel', 'grid'
@@ -285,7 +299,7 @@ const DatasetCreation = ({ onNotification }) => {
         // Create image objects with actual backend filenames
         const refreshedImages = dataset.images.map((img, index) => ({
           id: Date.now() + index,
-          path: img.path || `capture_${Date.now()}.jpg`,
+          path: img.path || generateCaptureFilename(),
           filename: img.filename || img.path?.split('/').pop(),
           timestamp: img.timestamp || new Date().toISOString(),
           labels: img.labels,
@@ -698,8 +712,8 @@ const DatasetCreation = ({ onNotification }) => {
       
       const newImage = {
         id: Date.now(),
-        path: response.data.screenshot_path || `capture_${Date.now()}.jpg`,
-        filename: response.data.filename || `capture_${Date.now()}.jpg`,
+        path: response.data.screenshot_path || generateCaptureFilename(),
+        filename: response.data.filename || generateCaptureFilename(),
         timestamp: response.data.timestamp || new Date().toISOString(),
         labels: null,
         thumbnail: thumbnailData
