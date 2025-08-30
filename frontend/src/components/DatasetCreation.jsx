@@ -265,52 +265,66 @@ const DatasetCreation = ({ onNotification }) => {
     }
   };
 
-  // Reload images from current dataset
+  // Refresh images by clearing thumbnails and forcing backend URL reload
   const reloadImagesFromDataset = async () => {
-    if (!currentDataset) {
+    if (capturedImages.length === 0) {
       onNotification({
-        type: 'warning',
-        title: 'No Dataset Selected',
-        message: 'Please select a dataset to reload images from'
+        type: 'info',
+        title: 'No Images to Refresh',
+        message: 'No captured images found to refresh'
       });
       return;
     }
 
     try {
-      const response = await datasetAPI.getDataset(currentDataset.id);
-      const datasetInfo = response.data;
+      // Clear thumbnails to force reload from backend
+      const refreshedImages = capturedImages.map(img => ({
+        ...img,
+        thumbnail: null, // Clear thumbnail to force backend URL usage
+      }));
       
-      if (datasetInfo.images && datasetInfo.images.length > 0) {
-        // Map backend images to our frontend format
-        const reloadedImages = datasetInfo.images.map((img, index) => ({
-          id: img.id || Date.now() + index,
-          path: img.path || img.filename,
-          filename: img.filename,
-          timestamp: img.timestamp || img.created_at,
-          labels: img.labels || null,
-          thumbnail: null, // Force reload from backend
-        }));
+      setCapturedImages(refreshedImages);
+      
+      // Test if backend images are accessible by trying to load the first one
+      if (refreshedImages.length > 0 && refreshedImages[0].filename) {
+        const testUrl = videoAPI.getImageUrl(refreshedImages[0].filename);
         
-        setCapturedImages(reloadedImages);
-        
-        onNotification({
-          type: 'success',
-          title: 'Images Reloaded',
-          message: `Reloaded ${reloadedImages.length} images from dataset "${currentDataset.name}"`
-        });
+        try {
+          const response = await fetch(testUrl, { method: 'HEAD' });
+          if (response.ok) {
+            onNotification({
+              type: 'success',
+              title: 'Images Refreshed',
+              message: `${refreshedImages.length} images refreshed from backend storage`
+            });
+          } else {
+            onNotification({
+              type: 'warning',
+              title: 'Images Refreshed',
+              message: 'Images refreshed but backend might not be fully ready yet'
+            });
+          }
+        } catch (error) {
+          onNotification({
+            type: 'info',
+            title: 'Images Refreshed',
+            message: 'Images refreshed. They will load when backend is ready.'
+          });
+        }
       } else {
         onNotification({
-          type: 'info',
-          title: 'No Images Found',
-          message: 'No images found in the current dataset'
+          type: 'success',
+          title: 'Images Refreshed',
+          message: 'Images refreshed from session data'
         });
       }
+      
     } catch (error) {
-      console.error('Failed to reload images:', error);
+      console.error('Failed to refresh images:', error);
       onNotification({
         type: 'error',
-        title: 'Reload Failed',
-        message: 'Failed to reload images from dataset'
+        title: 'Refresh Failed',
+        message: 'Failed to refresh images'
       });
     }
   };
@@ -1702,14 +1716,15 @@ const DatasetCreation = ({ onNotification }) => {
                       color="success"
                     />
                   )}
-                  {capturedImages.length > 0 && capturedImages.some(img => !img.thumbnail && img.filename) && (
+                  {capturedImages.length > 0 && (
                     <Button
                       size="small"
                       startIcon={<RefreshIcon />}
                       onClick={reloadImagesFromDataset}
                       variant="outlined"
+                      title="Refresh images from backend after Docker restart"
                     >
-                      Reload Images
+                      Refresh Images
                     </Button>
                   )}
                 </Box>
@@ -1847,10 +1862,24 @@ const DatasetCreation = ({ onNotification }) => {
                                 bgcolor: 'grey.100',
                                 backgroundImage: thumbnailUrl ? `url(${thumbnailUrl})` : 'none',
                                 backgroundSize: 'cover',
-                              backgroundPosition: 'center',
-                              backgroundRepeat: 'no-repeat',
-                            }}
-                          >
+                                backgroundPosition: 'center',
+                                backgroundRepeat: 'no-repeat',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                              }}
+                            >
+                              {!thumbnailUrl && (
+                                <Typography variant="caption" color="text.secondary" sx={{
+                                  position: 'absolute',
+                                  top: '50%',
+                                  left: '50%',
+                                  transform: 'translate(-50%, -50%)',
+                                  textAlign: 'center'
+                                }}>
+                                  📷<br/>Loading...
+                                </Typography>
+                              )}
                             {/* Selection checkbox in multi-select mode */}
                             {isMultiSelectMode && (
                               <IconButton
