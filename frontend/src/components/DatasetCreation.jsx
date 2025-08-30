@@ -291,16 +291,16 @@ const DatasetCreation = ({ onNotification }) => {
     }
 
     try {
-      // Fetch actual images from the dataset
-      const response = await datasetAPI.listDatasets();
-      const dataset = response.data?.datasets?.find(d => d.name === currentDataset.name);
+      // Fetch actual images from the dataset using the correct endpoint
+      const response = await datasetAPI.listDatasetImages(currentDataset.name);
+      const images = response.data?.images || [];
       
-      if (dataset && dataset.images && dataset.images.length > 0) {
+      if (images.length > 0) {
         // Create image objects with actual backend filenames
-        const refreshedImages = dataset.images.map((img, index) => ({
+        const refreshedImages = images.map((img, index) => ({
           id: Date.now() + index,
-          path: img.path || generateCaptureFilename(),
-          filename: img.filename || img.path?.split('/').pop(),
+          path: img.path || img.filename,
+          filename: img.filename,
           timestamp: img.timestamp || new Date().toISOString(),
           labels: img.labels,
           thumbnail: null // Will load from backend URL
@@ -712,8 +712,8 @@ const DatasetCreation = ({ onNotification }) => {
       
       const newImage = {
         id: Date.now(),
-        path: response.data.screenshot_path || generateCaptureFilename(),
-        filename: response.data.filename || generateCaptureFilename(),
+        path: response.data.screenshot_path,
+        filename: response.data.filename,
         timestamp: response.data.timestamp || new Date().toISOString(),
         labels: null,
         thumbnail: thumbnailData

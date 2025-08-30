@@ -121,6 +121,8 @@ export const datasetAPI = {
     }),
   exportDataset: (datasetId, format = 'llava') => 
     apiClient.post(`/dataset/${datasetId}/export`, { format }),
+  listDatasetImages: (datasetName) => 
+    apiClient.get(`/dataset/${datasetName}/images`),
   importDataset: (file, format = 'llava') => {
     const formData = new FormData();
     formData.append('file', file);
