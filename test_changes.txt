@@ -1,0 +1,2 @@
+Testing if changes are being tracked by git.
+This file should appear in git status.
