@@ -1892,6 +1892,17 @@ async def execute_training_job(job_name: str, job_metadata: dict, job_dir: Path)
                 with open(job_dir / "metadata.json", "w") as f:
                     json.dump(job_metadata, f, indent=2)
                 
+                # Broadcast training status update
+                await broadcast_update("training_progress", {
+                    "job_name": job_name,
+                    "model_name": job_metadata.get("model_name", "unknown"),
+                    "dataset_name": job_metadata.get("dataset_name", "unknown"),
+                    "status": "training",
+                    "current_epoch": 0,
+                    "total_epochs": total_epochs,
+                    "progress_percentage": 0
+                })
+                
                 # Add base_model to training config before calling
                 training_config = job_metadata["config"].copy()
                 training_config["base_model"] = job_metadata["base_model"]
@@ -1933,7 +1944,26 @@ async def execute_training_job(job_name: str, job_metadata: dict, job_dir: Path)
                     "updated_at": datetime.now().isoformat()
                 })
                 
+                # Save completion metadata
+                with open(job_dir / "metadata.json", "w") as f:
+                    json.dump(job_metadata, f, indent=2)
+                
+                # Broadcast training completion
+                await broadcast_update("training_completed", {
+                    "job_name": job_name,
+                    "model_name": job_metadata.get("model_name", "unknown"),
+                    "dataset_name": job_metadata.get("dataset_name", "unknown"),
+                    "status": "completed",
+                    "metrics": final_metrics,
+                    "completed_at": job_metadata.get("completed_at")
+                })
+                
                 log.info(f"YOLO training completed for job {job_name}")
+                
+                # Clean up task tracking and return
+                if job_name in running_training_tasks:
+                    del running_training_tasks[job_name]
+                return
                 
             except ImportError as e:
                 error_msg = f"YOLO training module import failed: {e}"
