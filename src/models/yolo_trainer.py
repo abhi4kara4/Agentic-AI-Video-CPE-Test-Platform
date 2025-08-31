@@ -444,15 +444,23 @@ async def train_yolo_model(dataset_name: str, model_name: str, training_config: 
             project_name=model_name
         )
         
-        # Start training
+        # Start training with progress callback
         print(f"Starting YOLO training for model: {model_name}")
+        
+        # Create progress callback function
+        async def progress_callback(epoch, total_epochs, metrics=None):
+            print(f"Training progress: Epoch {epoch}/{total_epochs}")
+            if metrics:
+                print(f"  Metrics: {metrics}")
+        
         training_results = await trainer.train_async(
             epochs=epochs,
             batch_size=batch_size,
             img_size=image_size,
             learning_rate=learning_rate,
             device=device,
-            patience=patience
+            patience=patience,
+            progress_callback=progress_callback
         )
         
         # Save metadata

@@ -1898,14 +1898,53 @@ async def execute_training_job(job_name: str, job_metadata: dict, job_dir: Path)
                     "model_name": job_metadata.get("model_name", "unknown"),
                     "dataset_name": job_metadata.get("dataset_name", "unknown"),
                     "status": "training",
-                    "current_epoch": 0,
-                    "total_epochs": total_epochs,
-                    "progress_percentage": 0
+                    "progress": {
+                        "current_epoch": 0,
+                        "total_epochs": total_epochs,
+                        "percentage": 0
+                    }
                 })
                 
                 # Add base_model to training config before calling
                 training_config = job_metadata["config"].copy()
                 training_config["base_model"] = job_metadata["base_model"]
+                
+                # Start real YOLO training with progress tracking
+                async def update_training_progress():
+                    """Periodically check and broadcast training progress"""
+                    import asyncio
+                    while True:
+                        try:
+                            await asyncio.sleep(10)  # Check progress every 10 seconds
+                            
+                            # Check if training is still running
+                            if job_name not in running_training_tasks:
+                                break
+                            task = running_training_tasks[job_name]
+                            if task.done():
+                                break
+                            
+                            # Re-read metadata to get current progress (if updated by training)
+                            if (job_dir / "metadata.json").exists():
+                                with open(job_dir / "metadata.json") as f:
+                                    current_metadata = json.load(f)
+                                
+                                if current_metadata.get("status") == "training":
+                                    progress = current_metadata.get("progress", {})
+                                    if progress and "current_epoch" in progress:
+                                        await broadcast_update("training_progress", {
+                                            "job_name": job_name,
+                                            "model_name": current_metadata.get("model_name", "unknown"),
+                                            "dataset_name": current_metadata.get("dataset_name", "unknown"),
+                                            "status": "training",
+                                            "progress": progress
+                                        })
+                        except Exception as e:
+                            log.warning(f"Progress update error: {e}")
+                            break
+                
+                # Start progress monitoring task
+                progress_task = asyncio.create_task(update_training_progress())
                 
                 # Start real YOLO training
                 training_results = await train_yolo_model(
@@ -1913,6 +1952,9 @@ async def execute_training_job(job_name: str, job_metadata: dict, job_dir: Path)
                     model_name=job_metadata["model_name"],
                     training_config=training_config
                 )
+                
+                # Stop progress monitoring
+                progress_task.cancel()
                 
                 if training_results.get('error'):
                     # Training failed
@@ -2175,17 +2217,93 @@ async def list_training_jobs_simplified():
             if metadata_file.exists():
                 with open(metadata_file) as f:
                     job_data = json.load(f)
+                    
+                    # Calculate progress percentage if missing
+                    progress = job_data.get("progress", {})
+                    if "percentage" not in progress and "current_epoch" in progress and "total_epochs" in progress:
+                        current = progress.get("current_epoch", 0)
+                        total = progress.get("total_epochs", 1)
+                        progress["percentage"] = round((current / total) * 100, 1) if total > 0 else 0
+                    
+                    # Ensure config has baseModel field
+                    config = job_data.get("config", {})
+                    if "baseModel" not in config and "base_model" in job_data:
+                        config["baseModel"] = job_data["base_model"]
+                    
+                    # Use final_metrics for completed jobs if available
+                    if job_data.get("status") == "completed" and "final_metrics" in job_data:
+                        progress = job_data["final_metrics"]
+                    
                     jobs.append({
                         "id": job_data.get("job_name"),
                         "modelName": job_data.get("model_name"),
                         "datasetName": job_data.get("dataset_name"),
                         "status": job_data.get("status", "unknown"),
-                        "startTime": job_data.get("created_at"),
-                        "config": job_data.get("config", {}),
-                        "progress": job_data.get("progress", {})
+                        "startTime": job_data.get("started_at") or job_data.get("created_at"),
+                        "completedAt": job_data.get("completed_at"),
+                        "config": config,
+                        "progress": progress,
+                        "baseModel": job_data.get("base_model"),
+                        "metrics": job_data.get("final_metrics", {}),
+                        "training_results": job_data.get("training_results", {})
                     })
     
     return {"jobs": jobs}
+
+
+@app.get("/training/{job_id}")
+async def get_training_job_details(job_id: str):
+    """Get detailed information about a specific training job"""
+    job_dir = TRAINING_DIR / "jobs" / job_id
+    metadata_file = job_dir / "metadata.json"
+    
+    if not metadata_file.exists():
+        raise HTTPException(status_code=404, detail="Training job not found")
+    
+    with open(metadata_file) as f:
+        job_data = json.load(f)
+    
+    # Calculate progress percentage if missing
+    progress = job_data.get("progress", {})
+    if "percentage" not in progress and "current_epoch" in progress and "total_epochs" in progress:
+        current = progress.get("current_epoch", 0)
+        total = progress.get("total_epochs", 1)
+        progress["percentage"] = round((current / total) * 100, 1) if total > 0 else 0
+    
+    # Include all available metrics for completed jobs
+    if job_data.get("status") == "completed":
+        training_results = job_data.get("training_results", {})
+        final_metrics = job_data.get("final_metrics", {})
+        
+        return {
+            "id": job_data.get("job_name"),
+            "modelName": job_data.get("model_name"),
+            "datasetName": job_data.get("dataset_name"),
+            "baseModel": job_data.get("base_model"),
+            "status": job_data.get("status"),
+            "startTime": job_data.get("started_at"),
+            "completedAt": job_data.get("completed_at"),
+            "config": job_data.get("config", {}),
+            "progress": progress,
+            "final_metrics": final_metrics,
+            "training_results": training_results,
+            "model_files": {
+                "best_model_path": training_results.get("best_model_path"),
+                "last_model_path": training_results.get("last_model_path"),
+                "results_dir": training_results.get("results_dir")
+            }
+        }
+    
+    return {
+        "id": job_data.get("job_name"),
+        "modelName": job_data.get("model_name"),
+        "datasetName": job_data.get("dataset_name"),
+        "baseModel": job_data.get("base_model"),
+        "status": job_data.get("status"),
+        "startTime": job_data.get("started_at") or job_data.get("created_at"),
+        "config": job_data.get("config", {}),
+        "progress": progress
+    }
 
 
 @app.post("/training/{job_id}/stop")
