@@ -26,11 +26,19 @@ COPY . .
 # Create necessary directories
 RUN mkdir -p logs screenshots reports training/models datasets testing
 
+# Backup models directory (in case volume mount overwrites it)
+RUN cp -r /app/src/models /app/models_backup || true
+
 # Ensure Python can find our modules
 ENV PYTHONPATH=/app:$PYTHONPATH
+
+# Copy startup scripts
+COPY startup.sh /app/startup.sh
+COPY init_models.py /app/init_models.py
+RUN chmod +x /app/startup.sh
 
 # Expose API port
 EXPOSE 8000
 
 # Default command
-CMD ["python", "-m", "uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["/app/startup.sh"]

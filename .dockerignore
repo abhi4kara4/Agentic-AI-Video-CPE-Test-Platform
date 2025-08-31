@@ -40,7 +40,7 @@ docs/
 .DS_Store
 Thumbs.db
 
-# Project specific
+# Project specific - data directories only
 screenshots/*
 reports/*
 logs/*.log
@@ -53,7 +53,4 @@ CHANGES_APPLIED.md
 COMPLETE_TRAINING_FIX.py
 verify_files.py
 src/test_mount.txt
-
-# Keep all source code
-!src/
-!src/**/*.py
+docker-compose.override.yml
