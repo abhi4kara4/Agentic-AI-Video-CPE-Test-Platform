@@ -43,8 +43,15 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./src:/app/src
-      - ./src/models:/app/src/models
+      - ./src/api:/app/src/api
+      - ./src/agent:/app/src/agent
+      - ./src/capture:/app/src/capture
+      - ./src/control:/app/src/control
+      - ./src/runner:/app/src/runner
+      - ./src/utils:/app/src/utils
+      - ./src/config.py:/app/src/config.py
+      - ./src/main.py:/app/src/main.py
+      - ./src/__init__.py:/app/src/__init__.py
       - ./tests:/app/tests
       - ./screenshots:/app/screenshots
       - ./datasets:/app/datasets
@@ -75,8 +82,15 @@ services:
       - ollama
       - redis
     volumes:
-      - ./src:/app/src
-      - ./src/models:/app/src/models
+      - ./src/api:/app/src/api
+      - ./src/agent:/app/src/agent
+      - ./src/capture:/app/src/capture
+      - ./src/control:/app/src/control
+      - ./src/runner:/app/src/runner
+      - ./src/utils:/app/src/utils
+      - ./src/config.py:/app/src/config.py
+      - ./src/main.py:/app/src/main.py
+      - ./src/__init__.py:/app/src/__init__.py
       - ./tests:/app/tests
       - ./reports:/app/reports
       - ./screenshots:/app/screenshots
