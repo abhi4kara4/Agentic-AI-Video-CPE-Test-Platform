@@ -1391,15 +1391,37 @@ async def list_available_models():
     
     # Add trained models
     try:
+        list_yolo_models = None
+        
+        # Try different import methods
         try:
             from src.models.yolo_inference import list_available_models as list_yolo_models
         except ImportError:
-            # Try alternate import path
-            import sys
-            import os
-            sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-            from src.models.yolo_inference import list_available_models as list_yolo_models
-        trained_models = list_yolo_models()
+            pass
+            
+        if not list_yolo_models:
+            try:
+                from models.yolo_inference import list_available_models as list_yolo_models
+            except ImportError:
+                pass
+                
+        if not list_yolo_models:
+            try:
+                import sys
+                import os
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                src_dir = os.path.dirname(current_dir)
+                if src_dir not in sys.path:
+                    sys.path.insert(0, src_dir)
+                from models.yolo_inference import list_available_models as list_yolo_models
+            except ImportError:
+                pass
+                
+        if list_yolo_models:
+            trained_models = list_yolo_models()
+        else:
+            log.warning("Could not import YOLO inference module")
+            trained_models = {}
         
         for model_name, model_info in trained_models.items():
             models[model_name] = {
@@ -1542,8 +1564,8 @@ async def start_training_job(job_name: str, background_tasks: BackgroundTasks):
         "status": "running"
     })
     
-    # Add to background tasks (simulated training)
-    background_tasks.add_task(simulate_training, job_name)
+    # This endpoint is deprecated - use /training/start instead
+    raise HTTPException(status_code=400, detail="Use /training/start endpoint instead")
     
     return {"status": "started", "job_name": job_name}
 
@@ -1700,7 +1722,10 @@ async def _simulate_training(job_metadata: dict, job_dir: Path, total_epochs: in
         # Broadcast progress update
         await broadcast_update("training_progress", {
             "job_name": job_name,
-            "progress": job_metadata["progress"]
+            "model_name": job_metadata.get("model_name", "unknown"),
+            "dataset_name": job_metadata.get("dataset_name", "unknown"),
+            "progress": job_metadata.get("progress", {}),
+            "status": job_metadata.get("status", "training")
         })
         
         log.info(f"Training {job_name}: Epoch {epoch}/{total_epochs} - {metrics}")
@@ -1708,7 +1733,12 @@ async def _simulate_training(job_metadata: dict, job_dir: Path, total_epochs: in
     # Training completed successfully
     job_metadata["status"] = "completed"
     job_metadata["completed_at"] = datetime.now().isoformat()
-    job_metadata["final_metrics"] = job_metadata["progress"]
+    job_metadata["final_metrics"] = job_metadata.get("progress", {
+        "loss": 0.1,
+        "accuracy": 0.85,
+        "current_epoch": total_epochs,
+        "total_epochs": total_epochs
+    })
     
     # Save trained model metadata (simulated)
     models_dir = TRAINING_DIR / "models"
@@ -1757,17 +1787,54 @@ async def execute_training_job(job_name: str, job_metadata: dict, job_dir: Path)
         # Use real YOLO training for object detection datasets
         if dataset_type == "object_detection":
             try:
-                # Import real YOLO trainer with fallback paths
+                # Import real YOLO trainer with multiple fallback paths
+                train_yolo_model = None
+                import_errors = []
+                
+                # Try different import methods
                 try:
                     from src.models.yolo_trainer import train_yolo_model
-                except ImportError:
-                    # Try alternate import path
-                    import sys
-                    import os
-                    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-                    from src.models.yolo_trainer import train_yolo_model
+                except ImportError as e:
+                    import_errors.append(f"Direct import failed: {e}")
+                    
+                if not train_yolo_model:
+                    try:
+                        from models.yolo_trainer import train_yolo_model
+                    except ImportError as e:
+                        import_errors.append(f"Relative import failed: {e}")
+                        
+                if not train_yolo_model:
+                    try:
+                        import sys
+                        import os
+                        # Get the src directory path
+                        current_dir = os.path.dirname(os.path.abspath(__file__))
+                        src_dir = os.path.dirname(current_dir)
+                        if src_dir not in sys.path:
+                            sys.path.insert(0, src_dir)
+                        from models.yolo_trainer import train_yolo_model
+                    except ImportError as e:
+                        import_errors.append(f"Path-adjusted import failed: {e}")
+                        
+                if not train_yolo_model:
+                    # Last resort - direct file import
+                    try:
+                        import importlib.util
+                        trainer_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models', 'yolo_trainer.py')
+                        if os.path.exists(trainer_path):
+                            spec = importlib.util.spec_from_file_location("yolo_trainer", trainer_path)
+                            yolo_trainer = importlib.util.module_from_spec(spec)
+                            spec.loader.exec_module(yolo_trainer)
+                            train_yolo_model = yolo_trainer.train_yolo_model
+                        else:
+                            import_errors.append(f"Trainer file not found at: {trainer_path}")
+                    except Exception as e:
+                        import_errors.append(f"Direct file import failed: {e}")
                 
-                log.info(f"Starting real YOLO training for job {job_name}")
+                if not train_yolo_model:
+                    raise ImportError(f"Failed to import YOLO trainer. Errors: {'; '.join(import_errors)}")
+                
+                log.info(f"Successfully imported YOLO trainer. Starting real YOLO training for job {job_name}")
                 
                 # Update status to training
                 job_metadata.update({
@@ -1819,20 +1886,54 @@ async def execute_training_job(job_name: str, job_metadata: dict, job_dir: Path)
                 log.info(f"YOLO training completed for job {job_name}")
                 
             except ImportError as e:
-                log.error(f"YOLO training not available: {e}")
-                log.info("Falling back to simulated training")
-                # Fall back to simulated training
-                await _simulate_training(job_metadata, job_dir, total_epochs, dataset_type)
-            except Exception as e:
-                log.error(f"YOLO training error: {e}")
+                error_msg = f"YOLO training module import failed: {e}"
+                log.error(error_msg)
                 job_metadata.update({
                     "status": "failed",
-                    "error": str(e),
-                    "updated_at": datetime.now().isoformat()
+                    "error": error_msg,
+                    "failed_at": datetime.now().isoformat()
                 })
+                with open(job_dir / "metadata.json", "w") as f:
+                    json.dump(job_metadata, f, indent=2)
+                await broadcast_update("training_failed", {
+                    "job_name": job_name,
+                    "model_name": job_metadata.get("model_name", "unknown"),
+                    "error": error_msg
+                })
+                return
+            except Exception as e:
+                error_msg = f"YOLO training execution failed: {e}"
+                log.error(error_msg)
+                job_metadata.update({
+                    "status": "failed",
+                    "error": error_msg,
+                    "failed_at": datetime.now().isoformat()
+                })
+                with open(job_dir / "metadata.json", "w") as f:
+                    json.dump(job_metadata, f, indent=2)
+                await broadcast_update("training_failed", {
+                    "job_name": job_name,
+                    "model_name": job_metadata.get("model_name", "unknown"),
+                    "error": error_msg
+                })
+                return
         else:
-            # Use simulated training for other dataset types
-            await _simulate_training(job_metadata, job_dir, total_epochs, dataset_type)
+            # No real training available for non-object detection datasets yet
+            error_msg = f"Real training not implemented for dataset type: {dataset_type}"
+            log.error(error_msg)
+            job_metadata.update({
+                "status": "failed",
+                "error": error_msg,
+                "failed_at": datetime.now().isoformat()
+            })
+            with open(job_dir / "metadata.json", "w") as f:
+                json.dump(job_metadata, f, indent=2)
+            await broadcast_update("training_failed", {
+                "job_name": job_name,
+                "model_name": job_metadata.get("model_name", "unknown"),
+                "error": error_msg
+            })
+            return
         
         # Final metadata save (if not already done by real training)
         if job_metadata.get("status") != "completed":
@@ -1842,8 +1943,11 @@ async def execute_training_job(job_name: str, job_metadata: dict, job_dir: Path)
         # Broadcast completion
         await broadcast_update("training_completed", {
             "job_name": job_name,
-            "model_name": job_metadata["model_name"],
-            "metrics": job_metadata["final_metrics"]
+            "model_name": job_metadata.get("model_name", "unknown"),
+            "dataset_name": job_metadata.get("dataset_name", "unknown"),
+            "status": job_metadata.get("status", "completed"),
+            "metrics": job_metadata.get("final_metrics", {}),
+            "completed_at": job_metadata.get("completed_at")
         })
         
         log.info(f"Training job {job_name} completed successfully")
