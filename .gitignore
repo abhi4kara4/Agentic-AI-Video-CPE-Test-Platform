@@ -68,6 +68,7 @@ Thumbs.db
 
 # Ollama models (if stored locally)
 models/
+!src/models/
 
 # Archive folder
 Archive/
