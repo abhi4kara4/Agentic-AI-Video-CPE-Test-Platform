@@ -200,6 +200,59 @@ async def train_yolo_model(dataset_name: str, model_name: str, training_config: 
                 'training_time': 0
             }
         
+        # Check if dataset is a ZIP file and extract it
+        zip_file = dataset_path / f"{dataset_name}.zip"
+        if zip_file.exists():
+            print(f"Found ZIP file: {zip_file}")
+            import zipfile
+            with zipfile.ZipFile(zip_file, 'r') as zip_ref:
+                zip_ref.extractall(dataset_path)
+            print(f"Extracted ZIP to: {dataset_path}")
+        else:
+            # Check for any ZIP files in the dataset directory
+            zip_files = list(dataset_path.glob("*.zip"))
+            if zip_files:
+                print(f"Found ZIP files: {zip_files}")
+                import zipfile
+                for zip_file in zip_files:
+                    with zipfile.ZipFile(zip_file, 'r') as zip_ref:
+                        zip_ref.extractall(dataset_path)
+                    print(f"Extracted {zip_file.name}")
+        
+        # Check dataset structure after extraction
+        images_train = dataset_path / "images" / "train"
+        images_val = dataset_path / "images" / "val"
+        labels_train = dataset_path / "labels" / "train"
+        labels_val = dataset_path / "labels" / "val"
+        
+        print(f"Dataset structure check:")
+        print(f"  images/train exists: {images_train.exists()}")
+        print(f"  images/val exists: {images_val.exists()}")
+        print(f"  labels/train exists: {labels_train.exists()}")
+        print(f"  labels/val exists: {labels_val.exists()}")
+        
+        # Create validation set if it doesn't exist (copy from train)
+        if not images_val.exists() and images_train.exists():
+            print("Creating validation set from training images...")
+            import shutil
+            images_val.mkdir(parents=True, exist_ok=True)
+            labels_val.mkdir(parents=True, exist_ok=True)
+            
+            # Copy 20% of training images to validation
+            train_images = list(images_train.glob("*"))
+            val_count = max(1, len(train_images) // 5)
+            
+            for i, img_file in enumerate(train_images[:val_count]):
+                # Copy image
+                shutil.copy2(img_file, images_val / img_file.name)
+                
+                # Copy corresponding label if exists
+                label_file = labels_train / f"{img_file.stem}.txt"
+                if label_file.exists():
+                    shutil.copy2(label_file, labels_val / label_file.name)
+            
+            print(f"Created validation set with {val_count} images")
+        
         # Extract parameters from frontend
         epochs = training_config.get('epochs', 50)
         batch_size = training_config.get('batch_size', 16)
@@ -208,10 +261,17 @@ async def train_yolo_model(dataset_name: str, model_name: str, training_config: 
         patience = training_config.get('patience', 50)
         device = training_config.get('device', 'auto')
         
+        # Get base model from config (frontend sends baseModel)
+        base_model = training_config.get('base_model') or training_config.get('baseModel', 'yolo11n')
+        if not base_model.endswith('.pt'):
+            base_model += '.pt'
+        
+        print(f"Using base model: {base_model}")
+        
         # Initialize trainer
         trainer = YOLOTrainer(
             dataset_path=str(dataset_path),
-            model_name=training_config.get('base_model', 'yolov8n.pt'),
+            model_name=base_model,
             output_dir="training/models",
             project_name=model_name
         )
