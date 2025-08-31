@@ -1894,6 +1894,7 @@ async def execute_training_job(job_name: str, job_metadata: dict, job_dir: Path)
                 
                 # Broadcast training status update
                 await broadcast_update("training_progress", {
+                    "job_id": job_name,
                     "job_name": job_name,
                     "model_name": job_metadata.get("model_name", "unknown"),
                     "dataset_name": job_metadata.get("dataset_name", "unknown"),
@@ -1933,6 +1934,7 @@ async def execute_training_job(job_name: str, job_metadata: dict, job_dir: Path)
                                     progress = current_metadata.get("progress", {})
                                     if progress and "current_epoch" in progress:
                                         await broadcast_update("training_progress", {
+                                            "job_id": job_name,
                                             "job_name": job_name,
                                             "model_name": current_metadata.get("model_name", "unknown"),
                                             "dataset_name": current_metadata.get("dataset_name", "unknown"),
@@ -2971,7 +2973,7 @@ async def broadcast_update(update_type: str, data: dict):
     message = {
         "type": update_type,
         "timestamp": datetime.now().isoformat(),
-        "data": data
+        "payload": data  # Changed from "data" to "payload" to match frontend expectation
     }
     await manager.broadcast(message)
 
