@@ -13,8 +13,9 @@ if app_dir not in sys.path:
 if os.getcwd() not in sys.path:
     sys.path.insert(0, os.getcwd())
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, BackgroundTask, UploadFile, File, WebSocket, WebSocketDisconnect, Form
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, WebSocket, WebSocketDisconnect, Form
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
+from starlette.background import BackgroundTask
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
