@@ -1896,7 +1896,8 @@ async def execute_training_job(job_name: str, job_metadata: dict, job_dir: Path)
                 training_results = await train_yolo_model(
                     dataset_name=job_metadata["dataset_name"],
                     model_name=job_metadata["model_name"],
-                    training_config=job_metadata["config"]
+                    training_config=job_metadata["config"],
+                    base_model=job_metadata["base_model"]
                 )
                 
                 if training_results.get('error'):

@@ -174,12 +174,13 @@ class YOLOTrainer:
 
 
 # API Integration function
-async def train_yolo_model(dataset_name: str, model_name: str, training_config: Dict[str, Any]) -> Dict[str, Any]:
+async def train_yolo_model(dataset_name: str, model_name: str, training_config: Dict[str, Any], base_model: str = None) -> Dict[str, Any]:
     """High-level function to train YOLO model for API integration"""
     try:
         print(f"\\nStarting REAL YOLO training:")
         print(f"  Dataset: {dataset_name}")
         print(f"  Model: {model_name}")
+        print(f"  Base model param: {base_model}")
         print(f"  Config: {training_config}")
         
         if not YOLO_AVAILABLE:
@@ -189,9 +190,26 @@ async def train_yolo_model(dataset_name: str, model_name: str, training_config: 
                 'training_time': 0
             }
         
-        # Setup paths
+        # Setup paths - match the exact path structure used by main.py
+        print(f"Current working directory: {os.getcwd()}")
         datasets_dir = Path("datasets")
         dataset_path = datasets_dir / dataset_name
+        
+        # Also check if we're running from /app and datasets is elsewhere
+        if not datasets_dir.exists():
+            datasets_dir = Path("/app/datasets")
+            dataset_path = datasets_dir / dataset_name
+        
+        print(f"Datasets directory: {datasets_dir}")
+        print(f"Dataset path: {dataset_path}")
+        print(f"Dataset path exists: {dataset_path.exists()}")
+        
+        if dataset_path.exists():
+            print(f"Contents of dataset directory:")
+            for item in dataset_path.iterdir():
+                print(f"  - {item.name} ({'dir' if item.is_dir() else 'file'} - {item.stat().st_size if item.is_file() else 'N/A'} bytes)")
+        else:
+            print(f"Dataset directory does not exist: {dataset_path}")
         
         if not dataset_path.exists():
             return {
@@ -261,17 +279,21 @@ async def train_yolo_model(dataset_name: str, model_name: str, training_config: 
         patience = training_config.get('patience', 50)
         device = training_config.get('device', 'auto')
         
-        # Get base model from config (frontend sends baseModel)
-        base_model = training_config.get('base_model') or training_config.get('baseModel', 'yolo11n')
-        if not base_model.endswith('.pt'):
-            base_model += '.pt'
+        # Get base model - prioritize parameter, then config, then default
+        if base_model:
+            selected_model = base_model
+        else:
+            selected_model = training_config.get('base_model') or training_config.get('baseModel', 'yolo11n')
         
-        print(f"Using base model: {base_model}")
+        if not selected_model.endswith('.pt'):
+            selected_model += '.pt'
+        
+        print(f"Using base model: {selected_model}")
         
         # Initialize trainer
         trainer = YOLOTrainer(
             dataset_path=str(dataset_path),
-            model_name=base_model,
+            model_name=selected_model,
             output_dir="training/models",
             project_name=model_name
         )
