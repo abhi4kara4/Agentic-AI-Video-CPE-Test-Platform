@@ -157,6 +157,10 @@ export const trainingAPI = {
   deleteModel: (modelName) => apiClient.delete(`/models/${modelName}`),
   downloadModel: (modelName) => 
     apiClient.get(`/models/${modelName}/download`, { responseType: 'blob' }),
+  downloadModelZip: (modelName) => 
+    apiClient.get(`/models/${modelName}/download/zip`, { responseType: 'blob' }),
+  downloadModelFile: (modelName, fileType) => 
+    apiClient.get(`/models/${modelName}/download?file_type=${fileType}`, { responseType: 'blob' }),
   getModelDetails: (modelName) => 
     apiClient.get(`/models/${modelName}/details`),
   exportModel: (modelName, format = 'pytorch') => 

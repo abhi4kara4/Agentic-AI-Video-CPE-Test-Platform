@@ -15,6 +15,7 @@ if os.getcwd() not in sys.path:
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, WebSocket, WebSocketDisconnect, Form
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
+from fastapi.background import BackgroundTask
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
@@ -2440,6 +2441,90 @@ async def download_model(model_name: str, file_type: str = "best"):
         filename=f"{model_name}_{file_type}.pt",
         media_type='application/octet-stream'
     )
+
+
+@app.get("/models/{model_name}/download/zip")
+async def download_model_zip(model_name: str):
+    """Download the entire model directory as a zip file"""
+    model_dir = TRAINING_DIR / "models" / model_name
+    
+    if not model_dir.exists():
+        raise HTTPException(status_code=404, detail="Model not found")
+    
+    log.info(f"Creating zip file for model: {model_name}")
+    
+    import tempfile
+    import zipfile
+    import os
+    
+    # Create temporary zip file
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp_file:
+        zip_path = tmp_file.name
+    
+    try:
+        # Create zip file
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            # Add all files in the model directory
+            for root, dirs, files in os.walk(model_dir):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    # Get relative path from model directory
+                    arcname = os.path.relpath(file_path, model_dir)
+                    zipf.write(file_path, arcname)
+                    log.debug(f"Added to zip: {arcname}")
+            
+            # Also try to include model weights from results directory if available
+            metadata_file = model_dir / "metadata.json"
+            if metadata_file.exists():
+                with open(metadata_file) as f:
+                    model_data = json.load(f)
+                
+                model_files = model_data.get("model_files", {})
+                results_dir = model_files.get("results_dir")
+                
+                if results_dir and Path(results_dir).exists():
+                    log.info(f"Including results directory: {results_dir}")
+                    # Add files from results directory
+                    for root, dirs, files in os.walk(results_dir):
+                        for file in files:
+                            file_path = os.path.join(root, file)
+                            # Create a nice path structure in the zip
+                            rel_path = os.path.relpath(file_path, results_dir)
+                            arcname = f"training_results/{rel_path}"
+                            try:
+                                zipf.write(file_path, arcname)
+                                log.debug(f"Added training result to zip: {arcname}")
+                            except Exception as e:
+                                log.warning(f"Failed to add {file_path} to zip: {e}")
+        
+        # Get zip file size for logging
+        zip_size = os.path.getsize(zip_path)
+        log.info(f"Created zip file for {model_name}: {zip_size} bytes ({zip_size / 1024 / 1024:.1f} MB)")
+        
+        # Return the zip file
+        return FileResponse(
+            path=zip_path,
+            filename=f"{model_name}_complete.zip",
+            media_type='application/zip',
+            background=BackgroundTask(cleanup_temp_file, zip_path)  # Clean up temp file after download
+        )
+        
+    except Exception as e:
+        # Clean up on error
+        if os.path.exists(zip_path):
+            os.unlink(zip_path)
+        log.error(f"Failed to create zip for model {model_name}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to create zip file: {str(e)}")
+
+
+def cleanup_temp_file(file_path: str):
+    """Background task to clean up temporary files"""
+    try:
+        if os.path.exists(file_path):
+            os.unlink(file_path)
+            log.debug(f"Cleaned up temp file: {file_path}")
+    except Exception as e:
+        log.warning(f"Failed to clean up temp file {file_path}: {e}")
 
 
 @app.delete("/models/{model_name}")

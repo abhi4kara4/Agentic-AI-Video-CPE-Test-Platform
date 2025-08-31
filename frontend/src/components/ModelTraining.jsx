@@ -36,6 +36,8 @@ import {
   TableBody,
   TableRow,
   TableCell,
+  Menu,
+  Divider,
 } from '@mui/material';
 import {
   ModelTraining as TrainingIcon,
@@ -291,6 +293,8 @@ const ModelTraining = ({ onNotification }) => {
   const [modelDetailsDialog, setModelDetailsDialog] = useState(false);
   const [selectedModelForDetails, setSelectedModelForDetails] = useState(null);
   const [modelDetails, setModelDetails] = useState(null);
+  const [downloadMenuAnchor, setDownloadMenuAnchor] = useState(null);
+  const [selectedModelForDownload, setSelectedModelForDownload] = useState(null);
 
   // Load data on component mount
   useEffect(() => {
@@ -310,8 +314,37 @@ const ModelTraining = ({ onNotification }) => {
     };
 
     const handleTrainingProgress = (data) => {
-      console.log('Training progress:', data);
-      loadTrainingJobs(); // Refresh job list to show progress
+      console.log('Training progress received:', data);
+      
+      // Update the specific job's progress in real-time without full API refresh
+      setTrainingJobs(prevJobs => 
+        prevJobs.map(job => {
+          // Match by job_id, job_name, or model_name from the WebSocket payload
+          const isMatchingJob = job.id === data.job_id || 
+                               job.id === data.job_name ||
+                               job.modelName === data.model_name;
+          
+          if (isMatchingJob) {
+            console.log(`Updating progress for job ${job.id}:`, data.progress);
+            
+            return {
+              ...job,
+              progress: {
+                current_epoch: data.progress?.current_epoch || data.current_epoch,
+                total_epochs: data.progress?.total_epochs || data.total_epochs,
+                percentage: data.progress?.percentage || 
+                           (data.current_epoch && data.total_epochs ? 
+                            Math.round((data.current_epoch / data.total_epochs) * 100) : 0),
+                loss: data.progress?.loss || data.loss,
+                mAP: data.progress?.mAP || data.mAP,
+                accuracy: data.progress?.accuracy || data.accuracy
+              },
+              status: data.status || 'running' // Use status from WebSocket or default to running
+            };
+          }
+          return job;
+        })
+      );
     };
 
     const handleTrainingCompleted = (data) => {
@@ -488,15 +521,36 @@ const ModelTraining = ({ onNotification }) => {
     }
   };
 
-  const handleDownloadModel = async (modelName) => {
+  const handleDownloadMenuOpen = (event, modelName) => {
+    setDownloadMenuAnchor(event.currentTarget);
+    setSelectedModelForDownload(modelName);
+  };
+
+  const handleDownloadMenuClose = () => {
+    setDownloadMenuAnchor(null);
+    setSelectedModelForDownload(null);
+  };
+
+  const handleDownloadModel = async (modelName, fileType = 'zip') => {
     try {
-      const response = await trainingAPI.downloadModel(modelName);
+      let response;
+      let filename;
+      
+      if (fileType === 'zip') {
+        // Download complete model as zip
+        response = await trainingAPI.downloadModelZip(modelName);
+        filename = `${modelName}_complete.zip`;
+      } else {
+        // Download individual weight file
+        response = await trainingAPI.downloadModelFile(modelName, fileType);
+        filename = `${modelName}_${fileType}.pt`;
+      }
       
       // Create download link
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `${modelName}.zip`);
+      link.setAttribute('download', filename);
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -505,7 +559,7 @@ const ModelTraining = ({ onNotification }) => {
       onNotification({
         type: 'success',
         title: 'Download Started',
-        message: `Downloading model ${modelName}`
+        message: `Downloading ${filename}`
       });
     } catch (error) {
       onNotification({
@@ -514,6 +568,8 @@ const ModelTraining = ({ onNotification }) => {
         message: error.response?.data?.detail || 'Failed to download model'
       });
     }
+    
+    handleDownloadMenuClose();
   };
 
   const handleViewModelDetails = async (model) => {
@@ -779,52 +835,75 @@ const ModelTraining = ({ onNotification }) => {
                               </Box>
                             </Box>
 
+                            {/* Debug info - can be removed later */}
+                            {console.log(`Job ${job.id} status: ${job.status}, progress:`, job.progress)}
+                            
                             {/* Progress Section for Running Jobs */}
-                            {job.status === 'running' && job.progress && (
+                            {(job.status === 'running' || job.status === 'training') && (
                               <Box sx={{ mb: 2 }}>
                                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
-                                  <CircularProgress 
-                                    variant="determinate" 
-                                    value={job.progress.percentage || 0}
-                                    size={40}
-                                  />
-                                  <Box sx={{ flex: 1 }}>
-                                    <Typography variant="body2" color="text.primary">
-                                      Epoch {job.progress.current_epoch || 0} / {job.progress.total_epochs || 0}
-                                    </Typography>
-                                    <LinearProgress 
-                                      variant="determinate" 
-                                      value={job.progress.percentage || 0} 
-                                      sx={{ height: 8, borderRadius: 4 }}
-                                    />
-                                  </Box>
-                                  <Typography variant="body2" color="text.secondary">
-                                    {job.progress.percentage || 0}%
-                                  </Typography>
+                                  {job.progress ? (
+                                    <>
+                                      <CircularProgress 
+                                        variant="determinate" 
+                                        value={job.progress.percentage || 0}
+                                        size={40}
+                                      />
+                                      <Box sx={{ flex: 1 }}>
+                                        <Typography variant="body2" color="text.primary">
+                                          Epoch {job.progress.current_epoch || 0} / {job.progress.total_epochs || 0}
+                                        </Typography>
+                                        <LinearProgress 
+                                          variant="determinate" 
+                                          value={job.progress.percentage || 0} 
+                                          sx={{ height: 8, borderRadius: 4 }}
+                                        />
+                                      </Box>
+                                      <Typography variant="body2" color="text.secondary">
+                                        {job.progress.percentage || 0}%
+                                      </Typography>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <CircularProgress 
+                                        variant="indeterminate"
+                                        size={40}
+                                        color="primary"
+                                      />
+                                      <Box sx={{ flex: 1 }}>
+                                        <Typography variant="body2" color="text.primary">
+                                          Training starting...
+                                        </Typography>
+                                        <LinearProgress variant="indeterminate" sx={{ height: 8, borderRadius: 4 }} />
+                                      </Box>
+                                    </>
+                                  )}
                                 </Box>
                                 
-                                <Box sx={{ display: 'flex', gap: 3, mt: 1 }}>
-                                  {job.progress.loss && (
-                                    <Typography variant="caption" color="text.secondary">
-                                      Loss: {job.progress.loss}
-                                    </Typography>
-                                  )}
-                                  {job.progress.mAP && (
-                                    <Typography variant="caption" color="text.secondary">
-                                      mAP: {job.progress.mAP}
-                                    </Typography>
-                                  )}
-                                  {job.progress.accuracy && (
-                                    <Typography variant="caption" color="text.secondary">
-                                      Accuracy: {(job.progress.accuracy * 100).toFixed(1)}%
-                                    </Typography>
-                                  )}
-                                  {job.progress.perplexity && (
-                                    <Typography variant="caption" color="text.secondary">
-                                      Perplexity: {job.progress.perplexity}
-                                    </Typography>
-                                  )}
-                                </Box>
+                                {job.progress && (
+                                  <Box sx={{ display: 'flex', gap: 3, mt: 1 }}>
+                                    {job.progress.loss && (
+                                      <Typography variant="caption" color="text.secondary">
+                                        Loss: {job.progress.loss}
+                                      </Typography>
+                                    )}
+                                    {job.progress.mAP && (
+                                      <Typography variant="caption" color="text.secondary">
+                                        mAP: {job.progress.mAP}
+                                      </Typography>
+                                    )}
+                                    {job.progress.accuracy && (
+                                      <Typography variant="caption" color="text.secondary">
+                                        Accuracy: {(job.progress.accuracy * 100).toFixed(1)}%
+                                      </Typography>
+                                    )}
+                                    {job.progress.perplexity && (
+                                      <Typography variant="caption" color="text.secondary">
+                                        Perplexity: {job.progress.perplexity}
+                                      </Typography>
+                                    )}
+                                  </Box>
+                                )}
                               </Box>
                             )}
 
@@ -926,7 +1005,7 @@ const ModelTraining = ({ onNotification }) => {
                     />
                     <ListItemSecondaryAction>
                       <IconButton 
-                        onClick={() => handleDownloadModel(model.name)}
+                        onClick={(e) => handleDownloadMenuOpen(e, model.name)}
                         title="Download Model"
                       >
                         <DownloadIcon />
@@ -953,6 +1032,26 @@ const ModelTraining = ({ onNotification }) => {
         </Card>
       )}
 
+      {/* Download Menu */}
+      <Menu
+        anchorEl={downloadMenuAnchor}
+        open={Boolean(downloadMenuAnchor)}
+        onClose={handleDownloadMenuClose}
+      >
+        <MenuItem onClick={() => handleDownloadModel(selectedModelForDownload, 'zip')}>
+          <DownloadIcon sx={{ mr: 1 }} />
+          Download Complete Model (ZIP)
+        </MenuItem>
+        <Divider />
+        <MenuItem onClick={() => handleDownloadModel(selectedModelForDownload, 'best')}>
+          <DownloadIcon sx={{ mr: 1 }} />
+          Download Best Weights (.pt)
+        </MenuItem>
+        <MenuItem onClick={() => handleDownloadModel(selectedModelForDownload, 'last')}>
+          <DownloadIcon sx={{ mr: 1 }} />
+          Download Last Weights (.pt)
+        </MenuItem>
+      </Menu>
 
       {/* Training Configuration Dialog */}
       <Dialog
@@ -1230,7 +1329,7 @@ const ModelTraining = ({ onNotification }) => {
             <>
               <Button
                 startIcon={<DownloadIcon />}
-                onClick={() => handleDownloadModel(selectedModelForDetails.name)}
+                onClick={(e) => handleDownloadMenuOpen(e, selectedModelForDetails.name)}
                 variant="contained"
               >
                 Download Model
