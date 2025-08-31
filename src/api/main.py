@@ -1,3 +1,8 @@
+import sys
+import os
+# Add parent directory to Python path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
 from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, WebSocket, WebSocketDisconnect, Form
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -6,7 +11,6 @@ from contextlib import asynccontextmanager
 import asyncio
 import io
 import cv2
-import os
 import json
 from typing import Dict, Any, Optional, List
 import uuid
@@ -1387,7 +1391,14 @@ async def list_available_models():
     
     # Add trained models
     try:
-        from src.models.yolo_inference import list_available_models as list_yolo_models
+        try:
+            from src.models.yolo_inference import list_available_models as list_yolo_models
+        except ImportError:
+            # Try alternate import path
+            import sys
+            import os
+            sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+            from src.models.yolo_inference import list_available_models as list_yolo_models
         trained_models = list_yolo_models()
         
         for model_name, model_info in trained_models.items():
@@ -1746,8 +1757,15 @@ async def execute_training_job(job_name: str, job_metadata: dict, job_dir: Path)
         # Use real YOLO training for object detection datasets
         if dataset_type == "object_detection":
             try:
-                # Import real YOLO trainer
-                from src.models.yolo_trainer import train_yolo_model
+                # Import real YOLO trainer with fallback paths
+                try:
+                    from src.models.yolo_trainer import train_yolo_model
+                except ImportError:
+                    # Try alternate import path
+                    import sys
+                    import os
+                    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+                    from src.models.yolo_trainer import train_yolo_model
                 
                 log.info(f"Starting real YOLO training for job {job_name}")
                 
