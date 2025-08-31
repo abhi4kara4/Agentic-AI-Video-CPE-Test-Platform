@@ -1892,12 +1892,15 @@ async def execute_training_job(job_name: str, job_metadata: dict, job_dir: Path)
                 with open(job_dir / "metadata.json", "w") as f:
                     json.dump(job_metadata, f, indent=2)
                 
+                # Add base_model to training config before calling
+                training_config = job_metadata["config"].copy()
+                training_config["base_model"] = job_metadata["base_model"]
+                
                 # Start real YOLO training
                 training_results = await train_yolo_model(
                     dataset_name=job_metadata["dataset_name"],
                     model_name=job_metadata["model_name"],
-                    training_config=job_metadata["config"],
-                    base_model=job_metadata["base_model"]
+                    training_config=training_config
                 )
                 
                 if training_results.get('error'):
