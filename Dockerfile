@@ -26,6 +26,9 @@ COPY . .
 # Create necessary directories
 RUN mkdir -p logs screenshots reports training/models datasets testing
 
+# Ensure Python can find our modules
+ENV PYTHONPATH=/app:$PYTHONPATH
+
 # Expose API port
 EXPOSE 8000
 

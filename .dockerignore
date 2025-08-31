@@ -26,7 +26,6 @@ htmlcov/
 .tox/
 
 # Documentation
-*.md
 docs/
 
 # Environment
@@ -44,5 +43,17 @@ Thumbs.db
 # Project specific
 screenshots/*
 reports/*
-logs/*
+logs/*.log
+logs/*.zip
 captures/*
+
+# Debug files
+debug_*.py
+CHANGES_APPLIED.md
+COMPLETE_TRAINING_FIX.py
+verify_files.py
+src/test_mount.txt
+
+# Keep all source code
+!src/
+!src/**/*.py

@@ -43,7 +43,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./src:/app/src:ro
+      - ./src:/app/src
       - ./tests:/app/tests
       - ./screenshots:/app/screenshots
       - ./datasets:/app/datasets
@@ -74,7 +74,7 @@ services:
       - ollama
       - redis
     volumes:
-      - ./src:/app/src:ro
+      - ./src:/app/src
       - ./tests:/app/tests
       - ./reports:/app/reports
       - ./screenshots:/app/screenshots
