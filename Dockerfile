@@ -24,7 +24,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Create necessary directories
-RUN mkdir -p logs screenshots reports
+RUN mkdir -p logs screenshots reports src/models
 
 # Expose API port
 EXPOSE 8000

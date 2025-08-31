@@ -44,6 +44,7 @@ services:
       - "8000:8000"
     volumes:
       - ./src:/app/src
+      - ./src/models:/app/src/models
       - ./tests:/app/tests
       - ./screenshots:/app/screenshots
       - ./datasets:/app/datasets
@@ -75,6 +76,7 @@ services:
       - redis
     volumes:
       - ./src:/app/src
+      - ./src/models:/app/src/models
       - ./tests:/app/tests
       - ./reports:/app/reports
       - ./screenshots:/app/screenshots
