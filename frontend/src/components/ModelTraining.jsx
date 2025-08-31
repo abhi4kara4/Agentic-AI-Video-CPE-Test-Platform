@@ -32,6 +32,10 @@ import {
   Slider,
   FormControlLabel,
   Checkbox,
+  Table,
+  TableBody,
+  TableRow,
+  TableCell,
 } from '@mui/material';
 import {
   ModelTraining as TrainingIcon,
