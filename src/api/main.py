@@ -104,12 +104,59 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
+async def cleanup_orphaned_training_jobs():
+    """Clean up training jobs that were running before server restart"""
+    jobs_dir = TRAINING_DIR / "jobs"
+    if not jobs_dir.exists():
+        return
+    
+    log.info("Checking for orphaned training jobs...")
+    orphaned_count = 0
+    
+    for job_dir in jobs_dir.iterdir():
+        if job_dir.is_dir():
+            metadata_file = job_dir / "metadata.json"
+            if metadata_file.exists():
+                try:
+                    with open(metadata_file) as f:
+                        job_data = json.load(f)
+                    
+                    # Check if job was running/training when server stopped
+                    status = job_data.get("status")
+                    if status in ["running", "training"]:
+                        # Mark as stopped due to server restart
+                        job_data.update({
+                            "status": "stopped",
+                            "error": "Training interrupted by server restart",
+                            "stopped_at": datetime.now().isoformat(),
+                            "updated_at": datetime.now().isoformat()
+                        })
+                        
+                        # Save updated metadata
+                        with open(metadata_file, "w") as f:
+                            json.dump(job_data, f, indent=2)
+                        
+                        orphaned_count += 1
+                        log.info(f"Cleaned up orphaned training job: {job_data.get('job_name', 'unknown')}")
+                        
+                except Exception as e:
+                    log.error(f"Error cleaning up job in {job_dir}: {e}")
+    
+    if orphaned_count > 0:
+        log.info(f"Cleaned up {orphaned_count} orphaned training job(s)")
+    else:
+        log.info("No orphaned training jobs found")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan"""
     global orchestrator
     
     log.info("Starting AI Test Platform API")
+    
+    # Clean up orphaned training jobs from previous runs
+    await cleanup_orphaned_training_jobs()
     
     # Initialize orchestrator
     orchestrator = PlatformOrchestrator()
@@ -122,7 +169,31 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    # Cleanup
+    # Cleanup running training jobs before shutdown
+    if running_training_tasks:
+        log.info(f"Stopping {len(running_training_tasks)} running training jobs...")
+        for job_name, task in running_training_tasks.items():
+            if not task.done():
+                task.cancel()
+                # Mark job as stopped
+                job_dir = TRAINING_DIR / "jobs" / job_name
+                metadata_file = job_dir / "metadata.json"
+                if metadata_file.exists():
+                    try:
+                        with open(metadata_file) as f:
+                            job_data = json.load(f)
+                        job_data.update({
+                            "status": "stopped",
+                            "stopped_at": datetime.now().isoformat(),
+                            "updated_at": datetime.now().isoformat()
+                        })
+                        with open(metadata_file, "w") as f:
+                            json.dump(job_data, f, indent=2)
+                        log.info(f"Marked training job {job_name} as stopped")
+                    except Exception as e:
+                        log.error(f"Error updating job {job_name} on shutdown: {e}")
+    
+    # Cleanup orchestrator
     if orchestrator:
         await orchestrator.cleanup()
     log.info("API shutdown complete")
@@ -2369,6 +2440,13 @@ async def resume_training_job(job_id: str):
     log.info(f"Resumed training job: {job_id}")
     
     return {"status": "success", "message": f"Training job {job_id} resumed"}
+
+
+@app.post("/training/cleanup")
+async def cleanup_orphaned_jobs():
+    """Manually clean up orphaned training jobs"""
+    await cleanup_orphaned_training_jobs()
+    return {"status": "success", "message": "Orphaned training jobs have been cleaned up"}
 
 
 @app.delete("/training/{job_id}")
