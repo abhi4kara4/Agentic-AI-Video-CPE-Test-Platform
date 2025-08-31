@@ -1981,6 +1981,18 @@ async def execute_training_job(job_name: str, job_metadata: dict, job_dir: Path)
                 training_config = job_metadata["config"].copy()
                 training_config["base_model"] = job_metadata["base_model"]
                 
+                # Save job context for YOLO trainer progress updates
+                import tempfile
+                job_context_file = Path(tempfile.gettempdir()) / f"yolo_job_context_{job_metadata['model_name']}.json"
+                try:
+                    with open(job_context_file, "w") as f:
+                        json.dump({
+                            "job_dir": str(job_dir),
+                            "job_metadata": job_metadata
+                        }, f)
+                except Exception as e:
+                    log.warning(f"Failed to save job context: {e}")
+                
                 # Start real YOLO training with progress tracking
                 async def update_training_progress():
                     """Periodically check and broadcast training progress"""
@@ -2019,12 +2031,51 @@ async def execute_training_job(job_name: str, job_metadata: dict, job_dir: Path)
                 # Start progress monitoring task
                 progress_task = asyncio.create_task(update_training_progress())
                 
-                # Start real YOLO training
-                training_results = await train_yolo_model(
-                    dataset_name=job_metadata["dataset_name"],
-                    model_name=job_metadata["model_name"],
-                    training_config=training_config
-                )
+                # Start real YOLO training with timeout
+                try:
+                    # Set timeout based on epochs and device type
+                    device_type = training_config.get("device", "auto")
+                    epochs = training_config.get("epochs", 50)
+                    
+                    # Calculate reasonable timeout: 5 minutes per epoch for CPU, 2 minutes for GPU
+                    try:
+                        import torch
+                        cuda_available = torch.cuda.is_available()
+                    except ImportError:
+                        cuda_available = False
+                    
+                    if device_type == "cpu" or (device_type == "auto" and not cuda_available):
+                        timeout_per_epoch = 300  # 5 minutes per epoch for CPU
+                    else:
+                        timeout_per_epoch = 120  # 2 minutes per epoch for GPU
+                    
+                    total_timeout = max(timeout_per_epoch * epochs, 1800)  # Minimum 30 minutes
+                    log.info(f"Training timeout set to {total_timeout} seconds ({total_timeout//60} minutes)")
+                    
+                    training_results = await asyncio.wait_for(
+                        train_yolo_model(
+                            dataset_name=job_metadata["dataset_name"],
+                            model_name=job_metadata["model_name"],
+                            training_config=training_config
+                        ),
+                        timeout=total_timeout
+                    )
+                except asyncio.TimeoutError:
+                    error_msg = f"Training timed out after {total_timeout} seconds. Consider using a smaller model or fewer epochs for CPU training."
+                    log.error(error_msg)
+                    job_metadata.update({
+                        "status": "failed",
+                        "error": error_msg,
+                        "failed_at": datetime.now().isoformat()
+                    })
+                    with open(job_dir / "metadata.json", "w") as f:
+                        json.dump(job_metadata, f, indent=2)
+                    await broadcast_update("training_failed", {
+                        "job_name": job_name,
+                        "model_name": job_metadata.get("model_name", "unknown"),
+                        "error": error_msg
+                    })
+                    return
                 
                 # Stop progress monitoring
                 progress_task.cancel()
@@ -2179,23 +2230,193 @@ async def list_models_alias():
     models_dir = TRAINING_DIR / "models"
     models_dir.mkdir(exist_ok=True)
     
+    log.info(f"Scanning models directory: {models_dir}")
     models = []
-    for model_dir in models_dir.iterdir():
-        if model_dir.is_dir():
-            metadata_file = model_dir / "metadata.json"
-            if metadata_file.exists():
-                with open(metadata_file) as f:
-                    model_data = json.load(f)
-                    models.append({
-                        "name": model_data.get("name"),
-                        "type": model_data.get("dataset_type", "object_detection"),
-                        "baseModel": model_data.get("base_model"),
-                        "createdAt": model_data.get("created_at"),
-                        "metrics": model_data.get("metrics", {}),
-                        "status": model_data.get("status", "ready")
-                    })
     
-    return {"models": models}
+    try:
+        for model_dir in models_dir.iterdir():
+            if model_dir.is_dir():
+                log.debug(f"Found model directory: {model_dir.name}")
+                metadata_file = model_dir / "metadata.json"
+                if metadata_file.exists():
+                    try:
+                        with open(metadata_file) as f:
+                            model_data = json.load(f)
+                        
+                        # Verify model has required fields
+                        model_name = model_data.get("name")
+                        if not model_name:
+                            log.warning(f"Model in {model_dir.name} has no name field, skipping")
+                            continue
+                        
+                        # Check if model files exist
+                        model_files = model_data.get("model_files", {})
+                        has_weights = False
+                        if model_files.get("best_weights") and Path(model_files["best_weights"]).exists():
+                            has_weights = True
+                        elif model_files.get("last_weights") and Path(model_files["last_weights"]).exists():
+                            has_weights = True
+                        
+                        model_entry = {
+                            "name": model_name,
+                            "type": model_data.get("dataset_type", "object_detection"),
+                            "baseModel": model_data.get("base_model"),
+                            "createdAt": model_data.get("created_at"),
+                            "metrics": model_data.get("training_results", {}),
+                            "status": "ready" if has_weights else "incomplete",
+                            "dataset_name": model_data.get("dataset_name"),
+                            "training_results": model_data.get("training_results", {})
+                        }
+                        
+                        models.append(model_entry)
+                        log.debug(f"Added model: {model_name} (status: {model_entry['status']})")
+                        
+                    except Exception as e:
+                        log.error(f"Error reading metadata for {model_dir.name}: {e}")
+                        continue
+                else:
+                    log.debug(f"No metadata.json found in {model_dir.name}")
+        
+        log.info(f"Found {len(models)} trained models")
+        return {"models": models}
+        
+    except Exception as e:
+        log.error(f"Error listing models: {e}")
+        return {"models": []}
+
+
+@app.get("/models/{model_name}/details")
+async def get_model_details(model_name: str):
+    """Get detailed information about a specific trained model"""
+    model_dir = TRAINING_DIR / "models" / model_name
+    metadata_file = model_dir / "metadata.json"
+    
+    if not metadata_file.exists():
+        raise HTTPException(status_code=404, detail="Model not found")
+    
+    with open(metadata_file) as f:
+        model_data = json.load(f)
+    
+    # Check for actual model files
+    model_files = model_data.get("model_files", {})
+    best_weights = model_files.get("best_weights")
+    last_weights = model_files.get("last_weights")
+    
+    # Verify files exist
+    files_info = {}
+    if best_weights and Path(best_weights).exists():
+        files_info["best_weights"] = {
+            "path": best_weights,
+            "size": Path(best_weights).stat().st_size,
+            "exists": True
+        }
+    if last_weights and Path(last_weights).exists():
+        files_info["last_weights"] = {
+            "path": last_weights,
+            "size": Path(last_weights).stat().st_size,
+            "exists": True
+        }
+    
+    return {
+        "name": model_data.get("name"),
+        "base_model": model_data.get("base_model"),
+        "dataset_type": model_data.get("dataset_type"),
+        "dataset_name": model_data.get("dataset_name"),
+        "created_at": model_data.get("created_at"),
+        "status": model_data.get("status"),
+        "training_results": model_data.get("training_results", {}),
+        "model_files": files_info,
+        "metadata_path": str(metadata_file)
+    }
+
+
+@app.get("/models/{model_name}/download")
+async def download_model(model_name: str, file_type: str = "best"):
+    """Download trained model files"""
+    model_dir = TRAINING_DIR / "models" / model_name
+    metadata_file = model_dir / "metadata.json"
+    
+    if not metadata_file.exists():
+        raise HTTPException(status_code=404, detail="Model not found")
+    
+    with open(metadata_file) as f:
+        model_data = json.load(f)
+    
+    # Get model file path
+    model_files = model_data.get("model_files", {})
+    
+    if file_type == "best":
+        file_path = model_files.get("best_weights")
+    elif file_type == "last":
+        file_path = model_files.get("last_weights")
+    else:
+        raise HTTPException(status_code=400, detail="file_type must be 'best' or 'last'")
+    
+    if not file_path or not Path(file_path).exists():
+        raise HTTPException(status_code=404, detail=f"Model file not found: {file_type}")
+    
+    return FileResponse(
+        path=file_path,
+        filename=f"{model_name}_{file_type}.pt",
+        media_type='application/octet-stream'
+    )
+
+
+@app.delete("/models/{model_name}")
+async def delete_model(model_name: str):
+    """Delete a trained model and all its files"""
+    model_dir = TRAINING_DIR / "models" / model_name
+    
+    if not model_dir.exists():
+        raise HTTPException(status_code=404, detail="Model not found")
+    
+    try:
+        # Get metadata before deletion for cleanup info
+        metadata_file = model_dir / "metadata.json"
+        model_data = {}
+        if metadata_file.exists():
+            with open(metadata_file) as f:
+                model_data = json.load(f)
+        
+        # Delete model files
+        model_files = model_data.get("model_files", {})
+        deleted_files = []
+        
+        # Delete weight files
+        for file_type, file_path in model_files.items():
+            if file_path and Path(file_path).exists():
+                try:
+                    Path(file_path).unlink()
+                    deleted_files.append(file_path)
+                except Exception as e:
+                    log.warning(f"Failed to delete {file_path}: {e}")
+        
+        # Delete results directory if it exists
+        results_dir = model_files.get("results_dir")
+        if results_dir and Path(results_dir).exists():
+            try:
+                import shutil
+                shutil.rmtree(results_dir)
+                deleted_files.append(results_dir)
+            except Exception as e:
+                log.warning(f"Failed to delete results directory {results_dir}: {e}")
+        
+        # Delete model directory
+        import shutil
+        shutil.rmtree(model_dir)
+        deleted_files.append(str(model_dir))
+        
+        log.info(f"Deleted model {model_name} and {len(deleted_files)} associated files")
+        
+        return {
+            "status": "success",
+            "message": f"Model {model_name} deleted successfully",
+            "deleted_files": deleted_files
+        }
+        
+    except Exception as e:
+        log.error(f"Failed to delete model {model_name}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete model: {str(e)}")
 
 
 @app.post("/training/start")
@@ -2261,13 +2482,27 @@ async def start_training_simplified(request: dict):
         task = asyncio.create_task(execute_training_job(job_name, job_metadata, job_dir))
         running_training_tasks[job_name] = task
         
+        # Check for CPU training and warn about performance
+        device = job_metadata["config"].get("device", "auto")
+        try:
+            import torch
+            cuda_available = torch.cuda.is_available()
+        except ImportError:
+            cuda_available = False
+            
+        cpu_warning = ""
+        if device == "cpu" or (device == "auto" and not cuda_available):
+            if base_model in ["yolo11l", "yolo11m", "yolo11x"]:
+                cpu_warning = " ⚠️ WARNING: Large models on CPU may be very slow or cause timeouts. Consider using yolo11n or yolo11s for better performance."
+        
         log.info(f"Created and started training job: {job_name}")
         
         return {
             "jobId": job_name,
             "status": "success",
-            "message": f"Training job {job_name} created and started successfully",
-            "job": job_metadata
+            "message": f"Training job {job_name} created and started successfully{cpu_warning}",
+            "job": job_metadata,
+            "warning": cpu_warning.strip() if cpu_warning else None
         }
         
     except HTTPException:

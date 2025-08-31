@@ -168,7 +168,7 @@ class YOLOTrainer:
     def _train_sync(self, epochs: int, batch_size: int, img_size: int, learning_rate: float,
                     device: str, workers: int, patience: int, progress_callback: Optional[Callable]) -> Dict[str, Any]:
         """
-        Synchronous YOLO training implementation
+        Synchronous YOLO training implementation with progress tracking
         """
         try:
             print(f"Starting YOLO training with {epochs} epochs...")
@@ -189,14 +189,112 @@ class YOLOTrainer:
                     device = 'cpu'
                     print("💻 Using CPU (CUDA not available)")
             
-            # Reduce workers and batch size for CPU training
+            # Aggressive CPU optimizations to prevent hanging
             if device == 'cpu':
-                actual_workers = min(workers, 2)  # Reduce workers for CPU
-                actual_batch_size = min(batch_size, 8)  # Reduce batch size for CPU
-                print(f"⚡ CPU training optimizations: batch_size={actual_batch_size}, workers={actual_workers}")
+                actual_workers = 0  # Use single-threaded for CPU to avoid hanging
+                actual_batch_size = min(batch_size, 4)  # Very small batch size for CPU
+                # Force smaller image size for CPU training
+                if img_size > 640:
+                    img_size = 640
+                    print(f"🔧 Reduced image size to {img_size} for CPU training")
+                print(f"⚡ CPU training optimizations: batch_size={actual_batch_size}, workers={actual_workers}, img_size={img_size}")
+                print("⚠️  CPU training will be slow. Consider using a smaller model like yolo11n for faster training.")
             else:
                 actual_workers = workers
                 actual_batch_size = batch_size
+            
+            # Progress tracking via output monitoring
+            import threading
+            import sys
+            import io
+            import re
+            import time
+            
+            # Create a progress tracker that monitors training output
+            class OutputProgressTracker:
+                def __init__(self, callback, total_epochs):
+                    self.callback = callback
+                    self.total_epochs = total_epochs
+                    self.current_epoch = 0
+                    self.is_running = True
+                    
+                def parse_progress_from_output(self, output_line):
+                    """Parse YOLO training output to extract epoch information"""
+                    try:
+                        # Look for patterns like "1/100" or "Epoch 1/100"
+                        epoch_pattern = r'(\d+)/(\d+)'
+                        matches = re.findall(epoch_pattern, output_line)
+                        if matches:
+                            current, total = matches[0]
+                            current_epoch = int(current)
+                            total_epochs = int(total)
+                            
+                            if current_epoch != self.current_epoch and current_epoch <= self.total_epochs:
+                                self.current_epoch = current_epoch
+                                
+                                # Try to extract metrics from the line
+                                metrics = {}
+                                
+                                # Look for loss values
+                                loss_pattern = r'(\d+\.\d+)'
+                                losses = re.findall(loss_pattern, output_line)
+                                if len(losses) >= 3:  # box_loss, cls_loss, dfl_loss typically
+                                    metrics['train_loss'] = float(losses[0])
+                                
+                                # Call progress callback
+                                if self.callback:
+                                    try:
+                                        if asyncio.iscoroutinefunction(self.callback):
+                                            # Create new event loop for sync context
+                                            loop = asyncio.new_event_loop()
+                                            asyncio.set_event_loop(loop)
+                                            loop.run_until_complete(self.callback(self.current_epoch, self.total_epochs, metrics))
+                                            loop.close()
+                                        else:
+                                            self.callback(self.current_epoch, self.total_epochs, metrics)
+                                    except Exception as e:
+                                        print(f"Progress callback error: {e}")
+                                
+                                return True
+                    except Exception as e:
+                        pass
+                    return False
+                
+                def stop(self):
+                    self.is_running = False
+            
+            # Create progress tracker
+            progress_tracker = OutputProgressTracker(progress_callback, epochs)
+            
+            # Capture training output to monitor progress
+            class OutputCapture:
+                def __init__(self, progress_tracker):
+                    self.progress_tracker = progress_tracker
+                    self.original_stdout = sys.stdout
+                    self.original_stderr = sys.stderr
+                    
+                def write(self, text):
+                    # Write to original output
+                    self.original_stdout.write(text)
+                    self.original_stdout.flush()
+                    
+                    # Parse for progress
+                    if self.progress_tracker.is_running:
+                        self.progress_tracker.parse_progress_from_output(text)
+                
+                def flush(self):
+                    self.original_stdout.flush()
+                
+                def start_capture(self):
+                    sys.stdout = self
+                    # Don't capture stderr to avoid breaking error reporting
+                
+                def stop_capture(self):
+                    sys.stdout = self.original_stdout
+            
+            # Start output capture for progress tracking
+            output_capture = OutputCapture(progress_tracker)
+            output_capture.start_capture()
             
             # Prepare training arguments
             train_args = {
@@ -221,10 +319,15 @@ class YOLOTrainer:
             
             print(f"Training arguments: {train_args}")
             
-            # Start training
-            start_time = time.time()
-            results = self.model.train(**train_args)
-            end_time = time.time()
+            try:
+                # Start training
+                start_time = time.time()
+                results = self.model.train(**train_args)
+                end_time = time.time()
+            finally:
+                # Always restore output capture and stop progress tracking
+                output_capture.stop_capture()
+                progress_tracker.stop()
             
             # Get training results
             training_time = end_time - start_time
@@ -234,7 +337,7 @@ class YOLOTrainer:
             # Extract metrics from results
             metrics = {
                 'training_time': training_time,
-                'epochs_completed': epochs,
+                'epochs_completed': progress_tracker.current_epoch,
                 'best_model_path': str(best_model_path),
                 'last_model_path': str(last_model_path),
                 'results_dir': str(results.save_dir),
@@ -447,11 +550,74 @@ async def train_yolo_model(dataset_name: str, model_name: str, training_config: 
         # Start training with progress callback
         print(f"Starting YOLO training for model: {model_name}")
         
-        # Create progress callback function
-        async def progress_callback(epoch, total_epochs, metrics=None):
-            print(f"Training progress: Epoch {epoch}/{total_epochs}")
-            if metrics:
-                print(f"  Metrics: {metrics}")
+        # Create progress callback function that updates job metadata
+        def create_progress_callback(job_dir, job_metadata, dataset_name, model_name):
+            async def progress_callback(epoch, total_epochs, metrics=None):
+                try:
+                    print(f"Training progress: Epoch {epoch}/{total_epochs}")
+                    
+                    # Update job metadata with current progress
+                    percentage = round((epoch / total_epochs) * 100, 1) if total_epochs > 0 else 0
+                    
+                    # Re-read current metadata in case other updates occurred
+                    metadata_file = job_dir / "metadata.json"
+                    if metadata_file.exists():
+                        with open(metadata_file) as f:
+                            current_metadata = json.load(f)
+                    else:
+                        current_metadata = job_metadata.copy()
+                    
+                    # Update progress
+                    current_metadata["progress"] = {
+                        "current_epoch": epoch,
+                        "total_epochs": total_epochs,
+                        "percentage": percentage,
+                        "loss": metrics.get("train_loss", None) if metrics else None,
+                        "mAP": metrics.get("mAP50", None) if metrics else None
+                    }
+                    current_metadata["status"] = "training"
+                    current_metadata["updated_at"] = datetime.now().isoformat()
+                    
+                    # Save updated metadata
+                    with open(metadata_file, "w") as f:
+                        json.dump(current_metadata, f, indent=2)
+                    
+                    print(f"  Updated progress: {percentage}% ({epoch}/{total_epochs} epochs)")
+                    if metrics:
+                        print(f"  Metrics: {metrics}")
+                        
+                except Exception as e:
+                    print(f"Progress callback error: {e}")
+            
+            return progress_callback
+        
+        # Get the job directory and metadata for progress updates
+        # This is a bit hacky but necessary to access the job context
+        import os
+        import tempfile
+        job_context_file = Path(tempfile.gettempdir()) / f"yolo_job_context_{model_name}.json"
+        
+        # Check if job context was saved by main API
+        job_dir = None
+        job_metadata = {}
+        if job_context_file.exists():
+            try:
+                with open(job_context_file) as f:
+                    context = json.load(f)
+                    job_dir = Path(context["job_dir"])
+                    job_metadata = context["job_metadata"]
+            except:
+                pass
+        
+        # Create progress callback
+        if job_dir:
+            progress_callback = create_progress_callback(job_dir, job_metadata, dataset_name, model_name)
+        else:
+            # Fallback progress callback
+            async def progress_callback(epoch, total_epochs, metrics=None):
+                print(f"Training progress: Epoch {epoch}/{total_epochs}")
+                if metrics:
+                    print(f"  Metrics: {metrics}")
         
         training_results = await trainer.train_async(
             epochs=epochs,
@@ -462,6 +628,13 @@ async def train_yolo_model(dataset_name: str, model_name: str, training_config: 
             patience=patience,
             progress_callback=progress_callback
         )
+        
+        # Clean up context file
+        if job_context_file.exists():
+            try:
+                job_context_file.unlink()
+            except:
+                pass
         
         # Save metadata
         if not training_results.get('error'):
