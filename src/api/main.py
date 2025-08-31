@@ -1,7 +1,17 @@
 import sys
 import os
-# Add parent directory to Python path for imports
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+# Ensure proper Python path for imports
+current_file = os.path.abspath(__file__)
+api_dir = os.path.dirname(current_file)  # /app/src/api
+src_dir = os.path.dirname(api_dir)       # /app/src
+app_dir = os.path.dirname(src_dir)       # /app
+
+# Add both app and current directory to Python path
+if app_dir not in sys.path:
+    sys.path.insert(0, app_dir)
+if os.getcwd() not in sys.path:
+    sys.path.insert(0, os.getcwd())
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, WebSocket, WebSocketDisconnect, Form
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
@@ -26,14 +36,35 @@ from src.config import settings
 def get_yolo_trainer():
     """Import YOLO trainer with production-ready error handling"""
     try:
-        # Standard Python import - clean and simple
+        # Log current Python path and file locations for diagnostics
+        log.info(f"Python path: {sys.path[:3]}")
+        log.info(f"Current working directory: {os.getcwd()}")
+        
+        # Check if models directory exists
+        models_path = os.path.join(app_dir, 'src', 'models')
+        if os.path.exists(models_path):
+            log.info(f"Models directory found at: {models_path}")
+            log.info(f"Models directory contents: {os.listdir(models_path)}")
+        else:
+            log.error(f"Models directory not found at: {models_path}")
+        
+        # Try import
         from src.models.yolo_trainer import train_yolo_model
         log.info("Successfully imported YOLO trainer")
         return train_yolo_model
     except ImportError as e:
         log.error(f"Failed to import YOLO trainer: {e}")
-        log.error("Ensure src.models.yolo_trainer module exists and is properly installed")
-        raise ImportError("YOLO trainer module not found. Check installation and file structure.")
+        
+        # Additional diagnostics
+        try:
+            import src
+            log.info(f"src module location: {src.__file__ if hasattr(src, '__file__') else 'No __file__ attribute'}")
+            import src.models
+            log.info(f"src.models module location: {src.models.__file__ if hasattr(src.models, '__file__') else 'No __file__ attribute'}")
+        except ImportError as ie:
+            log.error(f"Cannot import src or src.models: {ie}")
+        
+        raise ImportError("YOLO trainer module not found. Check Docker volume mounts and file structure.")
 
 
 # Global orchestrator instance
