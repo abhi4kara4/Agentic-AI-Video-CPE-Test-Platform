@@ -2288,46 +2288,72 @@ async def list_models_alias():
 @app.get("/models/{model_name}/details")
 async def get_model_details(model_name: str):
     """Get detailed information about a specific trained model"""
+    log.info(f"Getting details for model: {model_name}")
+    
     model_dir = TRAINING_DIR / "models" / model_name
     metadata_file = model_dir / "metadata.json"
     
+    log.info(f"Looking for metadata at: {metadata_file}")
+    
     if not metadata_file.exists():
+        log.error(f"Model metadata not found: {metadata_file}")
         raise HTTPException(status_code=404, detail="Model not found")
     
-    with open(metadata_file) as f:
-        model_data = json.load(f)
-    
-    # Check for actual model files
-    model_files = model_data.get("model_files", {})
-    best_weights = model_files.get("best_weights")
-    last_weights = model_files.get("last_weights")
-    
-    # Verify files exist
-    files_info = {}
-    if best_weights and Path(best_weights).exists():
-        files_info["best_weights"] = {
-            "path": best_weights,
-            "size": Path(best_weights).stat().st_size,
-            "exists": True
+    try:
+        with open(metadata_file) as f:
+            model_data = json.load(f)
+        
+        log.debug(f"Model metadata loaded: {model_data}")
+        
+        # Check for actual model files
+        model_files = model_data.get("model_files", {})
+        best_weights = model_files.get("best_weights")
+        last_weights = model_files.get("last_weights")
+        
+        # Verify files exist
+        files_info = {}
+        if best_weights and Path(best_weights).exists():
+            files_info["best_weights"] = {
+                "path": best_weights,
+                "size": Path(best_weights).stat().st_size,
+                "exists": True
+            }
+        if last_weights and Path(last_weights).exists():
+            files_info["last_weights"] = {
+                "path": last_weights,
+                "size": Path(last_weights).stat().st_size,
+                "exists": True
+            }
+        
+        training_results = model_data.get("training_results", {})
+        
+        response = {
+            "name": model_data.get("name"),
+            "base_model": model_data.get("base_model"),
+            "dataset_type": model_data.get("dataset_type"),
+            "dataset_name": model_data.get("dataset_name"),
+            "created_at": model_data.get("created_at"),
+            "status": model_data.get("status"),
+            "training_results": training_results,
+            "model_files": files_info,
+            "metadata_path": str(metadata_file),
+            # Add more detailed training metrics
+            "metrics": {
+                "training_time": training_results.get("training_time", 0),
+                "epochs_completed": training_results.get("epochs_completed", 0),
+                "final_loss": training_results.get("final_loss"),
+                "final_map": training_results.get("final_map"),
+                "best_model_path": training_results.get("best_model_path"),
+                "last_model_path": training_results.get("last_model_path")
+            }
         }
-    if last_weights and Path(last_weights).exists():
-        files_info["last_weights"] = {
-            "path": last_weights,
-            "size": Path(last_weights).stat().st_size,
-            "exists": True
-        }
-    
-    return {
-        "name": model_data.get("name"),
-        "base_model": model_data.get("base_model"),
-        "dataset_type": model_data.get("dataset_type"),
-        "dataset_name": model_data.get("dataset_name"),
-        "created_at": model_data.get("created_at"),
-        "status": model_data.get("status"),
-        "training_results": model_data.get("training_results", {}),
-        "model_files": files_info,
-        "metadata_path": str(metadata_file)
-    }
+        
+        log.info(f"Returning model details for {model_name}: {len(response)} fields")
+        return response
+        
+    except Exception as e:
+        log.error(f"Error reading model metadata: {e}")
+        raise HTTPException(status_code=500, detail=f"Error reading model metadata: {str(e)}")
 
 
 @app.get("/models/{model_name}/download")
@@ -2342,6 +2368,9 @@ async def download_model(model_name: str, file_type: str = "best"):
     with open(metadata_file) as f:
         model_data = json.load(f)
     
+    log.info(f"Download request for model {model_name}, file_type: {file_type}")
+    log.debug(f"Model metadata: {model_data}")
+    
     # Get model file path
     model_files = model_data.get("model_files", {})
     
@@ -2352,11 +2381,62 @@ async def download_model(model_name: str, file_type: str = "best"):
     else:
         raise HTTPException(status_code=400, detail="file_type must be 'best' or 'last'")
     
-    if not file_path or not Path(file_path).exists():
-        raise HTTPException(status_code=404, detail=f"Model file not found: {file_type}")
+    if not file_path:
+        raise HTTPException(status_code=404, detail=f"Model file path not found in metadata: {file_type}")
+    
+    file_path_obj = Path(file_path)
+    log.info(f"Looking for model file at: {file_path}")
+    log.info(f"File exists: {file_path_obj.exists()}")
+    
+    if not file_path_obj.exists():
+        # Try alternative paths
+        alternatives = []
+        
+        # Try looking in the results directory
+        results_dir = model_files.get("results_dir")
+        if results_dir:
+            alt_path = Path(results_dir) / "weights" / f"{file_type}.pt"
+            alternatives.append(alt_path)
+            if alt_path.exists():
+                log.info(f"Found model file at alternative path: {alt_path}")
+                file_path_obj = alt_path
+            else:
+                log.warning(f"Alternative path does not exist: {alt_path}")
+        
+        # Try in model directory
+        alt_path2 = model_dir / f"{file_type}.pt"
+        alternatives.append(alt_path2)
+        if alt_path2.exists():
+            log.info(f"Found model file in model directory: {alt_path2}")
+            file_path_obj = alt_path2
+        
+        # If still not found, list directory contents for debugging
+        if not file_path_obj.exists():
+            log.error(f"Model file not found. Checked paths:")
+            for alt in [Path(file_path)] + alternatives:
+                log.error(f"  - {alt} (exists: {alt.exists()})")
+            
+            # List contents of directories for debugging
+            if results_dir and Path(results_dir).exists():
+                log.info(f"Contents of results directory {results_dir}:")
+                for item in Path(results_dir).rglob("*"):
+                    log.info(f"  - {item}")
+            
+            raise HTTPException(status_code=404, detail=f"Model file not found: {file_type}")
+    
+    # Verify it's actually a .pt file
+    if not str(file_path_obj).endswith('.pt'):
+        log.warning(f"File {file_path_obj} does not end with .pt, but proceeding with download")
+    
+    # Check file size to ensure it's reasonable
+    file_size = file_path_obj.stat().st_size
+    log.info(f"Model file size: {file_size} bytes ({file_size / 1024 / 1024:.1f} MB)")
+    
+    if file_size < 1000:  # Less than 1KB is suspicious for a model
+        log.warning(f"Model file seems very small: {file_size} bytes")
     
     return FileResponse(
-        path=file_path,
+        path=str(file_path_obj),
         filename=f"{model_name}_{file_type}.pt",
         media_type='application/octet-stream'
     )
@@ -2417,6 +2497,48 @@ async def delete_model(model_name: str):
     except Exception as e:
         log.error(f"Failed to delete model {model_name}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to delete model: {str(e)}")
+
+
+@app.get("/debug/models/{model_name}")
+async def debug_model_structure(model_name: str):
+    """Debug endpoint to see model directory structure"""
+    model_dir = TRAINING_DIR / "models" / model_name
+    
+    if not model_dir.exists():
+        return {"error": f"Model directory not found: {model_dir}"}
+    
+    structure = {}
+    
+    # List all files and directories
+    for item in model_dir.rglob("*"):
+        relative_path = item.relative_to(model_dir)
+        if item.is_file():
+            structure[str(relative_path)] = {
+                "type": "file",
+                "size": item.stat().st_size,
+                "exists": True
+            }
+        else:
+            structure[str(relative_path)] = {
+                "type": "directory",
+                "exists": True
+            }
+    
+    # Also check training/models directory structure
+    training_models_dir = TRAINING_DIR / "models"
+    all_models = []
+    if training_models_dir.exists():
+        for subdir in training_models_dir.iterdir():
+            if subdir.is_dir():
+                all_models.append(subdir.name)
+    
+    return {
+        "requested_model": model_name,
+        "model_directory": str(model_dir),
+        "directory_exists": model_dir.exists(),
+        "all_models": all_models,
+        "structure": structure
+    }
 
 
 @app.post("/training/start")
