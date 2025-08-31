@@ -23,11 +23,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Ensure models directory and files are properly copied
-COPY src/models/ /app/src/models/
-
 # Create necessary directories
-RUN mkdir -p logs screenshots reports
+RUN mkdir -p logs screenshots reports training/models datasets testing
 
 # Expose API port
 EXPOSE 8000
