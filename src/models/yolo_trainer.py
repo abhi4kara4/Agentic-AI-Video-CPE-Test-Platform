@@ -95,6 +95,35 @@ class YOLOTrainer:
         print(f"Training images: {train_count}, Validation images: {val_count}")
         print(f"Dataset path: {self.dataset_path.absolute()}")
         
+        # Additional validation: Check actual label files for class consistency
+        print("Validating label file class indices...")
+        found_classes = set()
+        for labels_dir in [self.dataset_path / 'labels' / 'train', self.dataset_path / 'labels' / 'val']:
+            if labels_dir.exists():
+                for label_file in labels_dir.glob("*.txt"):
+                    try:
+                        with open(label_file, 'r') as f:
+                            for line in f:
+                                parts = line.strip().split()
+                                if parts:
+                                    class_id = int(parts[0])
+                                    found_classes.add(class_id)
+                                    if class_id >= data_config['nc']:
+                                        print(f"WARNING: Found class {class_id} in {label_file}, but data.yaml only defines {data_config['nc']} classes (0-{data_config['nc']-1})")
+                    except Exception as e:
+                        print(f"Error validating {label_file}: {e}")
+        
+        if found_classes:
+            print(f"Found class indices in labels: {sorted(found_classes)}")
+            max_class = max(found_classes)
+            if max_class >= data_config['nc']:
+                print(f"ERROR: Maximum class index {max_class} exceeds data.yaml class count {data_config['nc']}")
+                print("This will cause training to fail. Please regenerate the dataset or update data.yaml")
+                return False
+            print("✅ All class indices are valid")
+        else:
+            print("WARNING: No class indices found in label files")
+        
         return True
     
     def initialize_model(self):
@@ -396,11 +425,27 @@ class YOLOTrainer:
         return str(metadata_path)
 
 
-def create_yolo_dataset_yaml(dataset_path: str, class_names: list, train_split: float = 0.8) -> str:
+def create_yolo_dataset_yaml(dataset_path: str, class_names: list = None, train_split: float = 0.8) -> str:
     """
     Create a YOLO-format data.yaml file for the dataset
     """
     dataset_path = Path(dataset_path)
+    
+    # If no class names provided, try to detect from dataset
+    if class_names is None:
+        # Try to load from classes.txt
+        classes_file = dataset_path / "classes.txt"
+        if classes_file.exists():
+            with open(classes_file, 'r') as f:
+                class_names = [line.strip() for line in f if line.strip()]
+        else:
+            # Use default classes
+            class_names = [
+                "button", "tile", "menu", "dialog", "keyboard", "focused_button", "focused_tile",
+                "video_player", "progress_bar", "buffering_spinner", "closed_caption", "subtitle",
+                "rail", "tab_bar", "loading_indicator", "error_message", "notification"
+            ]
+    
     yaml_content = {
         'path': str(dataset_path.absolute()),
         'train': 'images/train',
@@ -414,6 +459,7 @@ def create_yolo_dataset_yaml(dataset_path: str, class_names: list, train_split: 
         yaml.dump(yaml_content, f, default_flow_style=False)
     
     print(f"📄 YOLO dataset YAML created: {yaml_path}")
+    print(f"   Classes: {len(class_names)} - {class_names}")
     return str(yaml_path)
 
 
@@ -510,19 +556,85 @@ async def train_yolo_model(dataset_name: str, model_name: str, training_config: 
                     shutil.copy2(label_file, labels_val / label_file.name)
             print(f"Created validation set with {val_count} images")
         
-        # Create data.yaml
+        # Create or update data.yaml - Always validate and fix class count
         yaml_file = dataset_path / "data.yaml"
-        if not yaml_file.exists():
-            print(f"Creating data.yaml for {dataset_name}")
-            yaml_content = {
-                'path': str(dataset_path.absolute()),
-                'train': 'images/train',
-                'val': 'images/val',
-                'nc': 4,
-                'names': ['ui_element', 'button', 'text', 'image']
-            }
-            with open(yaml_file, 'w') as f:
-                yaml.dump(yaml_content, f)
+        print(f"Validating and updating data.yaml for {dataset_name}")
+        
+        # Try to detect classes from existing label files
+        detected_classes = set()
+        labels_train = dataset_path / "labels" / "train"
+        labels_val = dataset_path / "labels" / "val"
+        
+        # Scan label files to find all class indices
+        print("Scanning label files to detect class indices...")
+        for labels_dir in [labels_train, labels_val]:
+            if labels_dir.exists():
+                print(f"Scanning {labels_dir}...")
+                for label_file in labels_dir.glob("*.txt"):
+                    try:
+                        with open(label_file, 'r') as f:
+                            for line in f:
+                                parts = line.strip().split()
+                                if parts:
+                                    class_id = int(parts[0])
+                                    detected_classes.add(class_id)
+                    except Exception as e:
+                        print(f"Error reading label file {label_file}: {e}")
+        
+        # Check for classes.txt file
+        classes_file = dataset_path / "classes.txt"
+        class_names = []
+        if classes_file.exists():
+            print(f"Found classes.txt, reading class names...")
+            with open(classes_file, 'r') as f:
+                class_names = [line.strip() for line in f if line.strip()]
+            print(f"Found {len(class_names)} classes: {class_names}")
+        else:
+            # Fallback to default classes if no classes.txt found
+            # Use the full list of 17 classes from main.py
+            class_names = [
+                "button", "tile", "menu", "dialog", "keyboard", "focused_button", "focused_tile",
+                "video_player", "progress_bar", "buffering_spinner", "closed_caption", "subtitle",
+                "rail", "tab_bar", "loading_indicator", "error_message", "notification"
+            ]
+            print(f"No classes.txt found, using default {len(class_names)} classes")
+        
+        # Determine number of classes
+        if detected_classes:
+            max_class_id = max(detected_classes)
+            nc = max(max_class_id + 1, len(class_names))
+            print(f"Detected class indices: {sorted(detected_classes)}")
+            print(f"Maximum class index: {max_class_id}, setting nc={nc}")
+            
+            # Ensure we have enough class names
+            while len(class_names) < nc:
+                class_names.append(f"class_{len(class_names)}")
+        else:
+            nc = len(class_names)
+            print(f"No labels found, using nc={nc} based on class names")
+        
+        # Always create/update data.yaml with correct class count
+        yaml_content = {
+            'path': str(dataset_path.absolute()),
+            'train': 'images/train',
+            'val': 'images/val',
+            'nc': nc,
+            'names': class_names
+        }
+        with open(yaml_file, 'w') as f:
+            yaml.dump(yaml_content, f)
+        print(f"Created/updated data.yaml with {nc} classes: {class_names[:5]}{'...' if len(class_names) > 5 else ''}")
+        
+        # Clear existing YOLO cache files to ensure fresh validation
+        cache_files = list(dataset_path.glob("**/*.cache"))
+        if cache_files:
+            print(f"Clearing {len(cache_files)} YOLO cache files...")
+            for cache_file in cache_files:
+                try:
+                    cache_file.unlink()
+                    print(f"  Removed: {cache_file}")
+                except Exception as e:
+                    print(f"  Failed to remove {cache_file}: {e}")
         
         # Extract training parameters
         epochs = training_config.get('epochs', 50)
