@@ -19,7 +19,7 @@ import {
 
 import { CLASSIFICATION_CLASSES } from '../constants/datasetTypes.js';
 
-const ImageClassificationLabeler = ({ image, labels, onLabelsChange }) => {
+const ImageClassificationLabeler = ({ image, labels, onLabelsChange, customClasses = null }) => {
   const [selectedClass, setSelectedClass] = useState(labels?.className || '');
   const [confidence, setConfidence] = useState(labels?.confidence || 100);
   const [notes, setNotes] = useState(labels?.notes || '');
@@ -70,8 +70,11 @@ const ImageClassificationLabeler = ({ image, labels, onLabelsChange }) => {
     return 'Other';
   };
 
+  // Use custom classes if provided, otherwise fall back to defaults
+  const availableClasses = customClasses || CLASSIFICATION_CLASSES;
+  
   // Group classes by category
-  const groupedClasses = Object.entries(CLASSIFICATION_CLASSES).reduce((acc, [key, cls]) => {
+  const groupedClasses = Object.entries(availableClasses).reduce((acc, [key, cls]) => {
     const category = getClassCategory(key);
     if (!acc[category]) acc[category] = [];
     acc[category].push({ key, ...cls });

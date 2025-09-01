@@ -21,7 +21,13 @@ import {
   Checkbox,
   Slider,
   Divider,
-  Alert
+  Alert,
+  TextField,
+  IconButton,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemSecondaryAction
 } from '@mui/material';
 import {
   SmartToy as VisionIcon,
@@ -29,7 +35,10 @@ import {
   Label as ClassificationIcon,
   ExpandMore as ExpandIcon,
   ExpandLess as CollapseIcon,
-  Tune as AugmentationIcon
+  Tune as AugmentationIcon,
+  Add as AddIcon,
+  Delete as DeleteIcon,
+  Edit as EditIcon
 } from '@mui/icons-material';
 
 import { 
@@ -46,6 +55,17 @@ const DatasetTypeSelector = ({ open, onClose, onSelect, currentConfig }) => {
   const [augmentationOptions, setAugmentationOptions] = useState(
     currentConfig?.augmentationOptions || {}
   );
+  
+  // Custom classes state
+  const [customObjectDetectionClasses, setCustomObjectDetectionClasses] = useState(
+    currentConfig?.customClasses?.object_detection || { ...OBJECT_DETECTION_CLASSES }
+  );
+  const [customClassificationClasses, setCustomClassificationClasses] = useState(
+    currentConfig?.customClasses?.image_classification || { ...CLASSIFICATION_CLASSES }
+  );
+  const [showCustomClasses, setShowCustomClasses] = useState(false);
+  const [newClassName, setNewClassName] = useState('');
+  const [newClassDescription, setNewClassDescription] = useState('');
 
   const handleTypeChange = (event) => {
     const type = event.target.value;
@@ -64,12 +84,72 @@ const DatasetTypeSelector = ({ open, onClose, onSelect, currentConfig }) => {
     }));
   };
 
+  // Class management functions
+  const addCustomClass = () => {
+    if (!newClassName.trim()) return;
+    
+    const key = newClassName.toLowerCase().replace(/\s+/g, '_');
+    
+    if (selectedType === DATASET_TYPES.OBJECT_DETECTION) {
+      const nextId = Math.max(...Object.values(customObjectDetectionClasses).map(c => c.id), -1) + 1;
+      const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#DDA0DD', '#FFD93D', '#6BCB77', '#FF6B9D', '#C44569', '#F8B500'];
+      
+      setCustomObjectDetectionClasses(prev => ({
+        ...prev,
+        [key]: {
+          id: nextId,
+          name: newClassName.trim(),
+          color: colors[nextId % colors.length]
+        }
+      }));
+    } else if (selectedType === DATASET_TYPES.IMAGE_CLASSIFICATION) {
+      setCustomClassificationClasses(prev => ({
+        ...prev,
+        [key]: {
+          name: newClassName.trim(),
+          description: newClassDescription.trim() || `Custom class: ${newClassName.trim()}`
+        }
+      }));
+    }
+    
+    setNewClassName('');
+    setNewClassDescription('');
+  };
+
+  const removeCustomClass = (classKey) => {
+    if (selectedType === DATASET_TYPES.OBJECT_DETECTION) {
+      setCustomObjectDetectionClasses(prev => {
+        const newClasses = { ...prev };
+        delete newClasses[classKey];
+        return newClasses;
+      });
+    } else if (selectedType === DATASET_TYPES.IMAGE_CLASSIFICATION) {
+      setCustomClassificationClasses(prev => {
+        const newClasses = { ...prev };
+        delete newClasses[classKey];
+        return newClasses;
+      });
+    }
+  };
+
+  const resetToDefaultClasses = () => {
+    if (selectedType === DATASET_TYPES.OBJECT_DETECTION) {
+      setCustomObjectDetectionClasses({ ...OBJECT_DETECTION_CLASSES });
+    } else if (selectedType === DATASET_TYPES.IMAGE_CLASSIFICATION) {
+      setCustomClassificationClasses({ ...CLASSIFICATION_CLASSES });
+    }
+  };
+
   const handleConfirm = () => {
     if (!selectedType) return;
     
     onSelect({
       datasetType: selectedType,
-      augmentationOptions: augmentationOptions
+      augmentationOptions: augmentationOptions,
+      customClasses: {
+        object_detection: customObjectDetectionClasses,
+        image_classification: customClassificationClasses
+      }
     });
     onClose();
   };
@@ -91,11 +171,22 @@ const DatasetTypeSelector = ({ open, onClose, onSelect, currentConfig }) => {
     if (type === DATASET_TYPES.OBJECT_DETECTION) {
       return (
         <Box sx={{ mt: 2 }}>
-          <Typography variant="subtitle2" gutterBottom>
-            Object Classes:
-          </Typography>
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-            {Object.entries(OBJECT_DETECTION_CLASSES).map(([key, cls]) => (
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+            <Typography variant="subtitle2">
+              Object Classes ({Object.keys(customObjectDetectionClasses).length}):
+            </Typography>
+            <Button
+              size="small"
+              startIcon={<EditIcon />}
+              onClick={() => setShowCustomClasses(!showCustomClasses)}
+              variant={showCustomClasses ? "contained" : "outlined"}
+            >
+              {showCustomClasses ? 'Hide Editor' : 'Customize Classes'}
+            </Button>
+          </Box>
+          
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 1 }}>
+            {Object.entries(customObjectDetectionClasses).map(([key, cls]) => (
               <Chip
                 key={key}
                 label={cls.name}
@@ -105,9 +196,46 @@ const DatasetTypeSelector = ({ open, onClose, onSelect, currentConfig }) => {
                   color: 'white',
                   fontSize: '0.7rem'
                 }}
+                onDelete={showCustomClasses ? () => removeCustomClass(key) : undefined}
+                deleteIcon={showCustomClasses ? <DeleteIcon sx={{ color: 'white !important' }} /> : undefined}
               />
             ))}
           </Box>
+
+          <Collapse in={showCustomClasses}>
+            <Box sx={{ p: 2, bgcolor: 'grey.50', borderRadius: 1, mt: 1 }}>
+              <Box sx={{ display: 'flex', gap: 1, mb: 2, alignItems: 'flex-end' }}>
+                <TextField
+                  size="small"
+                  label="Class Name"
+                  value={newClassName}
+                  onChange={(e) => setNewClassName(e.target.value)}
+                  placeholder="e.g., Search Box"
+                  sx={{ flex: 1 }}
+                  onKeyPress={(e) => e.key === 'Enter' && addCustomClass()}
+                />
+                <Button
+                  variant="contained"
+                  startIcon={<AddIcon />}
+                  onClick={addCustomClass}
+                  disabled={!newClassName.trim()}
+                >
+                  Add Class
+                </Button>
+                <Button
+                  variant="outlined"
+                  color="error"
+                  onClick={resetToDefaultClasses}
+                  title="Reset to default classes"
+                >
+                  Reset
+                </Button>
+              </Box>
+              <Alert severity="info" sx={{ fontSize: '0.75rem' }}>
+                Add or remove classes for your specific use case. Default classes cover common TV/STB UI elements.
+              </Alert>
+            </Box>
+          </Collapse>
         </Box>
       );
     }
@@ -115,20 +243,77 @@ const DatasetTypeSelector = ({ open, onClose, onSelect, currentConfig }) => {
     if (type === DATASET_TYPES.IMAGE_CLASSIFICATION) {
       return (
         <Box sx={{ mt: 2 }}>
-          <Typography variant="subtitle2" gutterBottom>
-            Classification Classes:
-          </Typography>
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-            {Object.entries(CLASSIFICATION_CLASSES).map(([key, cls]) => (
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+            <Typography variant="subtitle2">
+              Classification Classes ({Object.keys(customClassificationClasses).length}):
+            </Typography>
+            <Button
+              size="small"
+              startIcon={<EditIcon />}
+              onClick={() => setShowCustomClasses(!showCustomClasses)}
+              variant={showCustomClasses ? "contained" : "outlined"}
+            >
+              {showCustomClasses ? 'Hide Editor' : 'Customize Classes'}
+            </Button>
+          </Box>
+          
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 1 }}>
+            {Object.entries(customClassificationClasses).map(([key, cls]) => (
               <Chip
                 key={key}
                 label={cls.name}
                 size="small"
                 variant="outlined"
                 sx={{ fontSize: '0.7rem' }}
+                onDelete={showCustomClasses ? () => removeCustomClass(key) : undefined}
+                deleteIcon={showCustomClasses ? <DeleteIcon /> : undefined}
               />
             ))}
           </Box>
+
+          <Collapse in={showCustomClasses}>
+            <Box sx={{ p: 2, bgcolor: 'grey.50', borderRadius: 1, mt: 1 }}>
+              <Box sx={{ display: 'flex', gap: 1, mb: 2, alignItems: 'flex-end' }}>
+                <TextField
+                  size="small"
+                  label="Class Name"
+                  value={newClassName}
+                  onChange={(e) => setNewClassName(e.target.value)}
+                  placeholder="e.g., Connection Error"
+                  sx={{ flex: 1 }}
+                  onKeyPress={(e) => e.key === 'Enter' && addCustomClass()}
+                />
+                <TextField
+                  size="small"
+                  label="Description (optional)"
+                  value={newClassDescription}
+                  onChange={(e) => setNewClassDescription(e.target.value)}
+                  placeholder="Describe this class"
+                  sx={{ flex: 1 }}
+                  onKeyPress={(e) => e.key === 'Enter' && addCustomClass()}
+                />
+                <Button
+                  variant="contained"
+                  startIcon={<AddIcon />}
+                  onClick={addCustomClass}
+                  disabled={!newClassName.trim()}
+                >
+                  Add Class
+                </Button>
+                <Button
+                  variant="outlined"
+                  color="error"
+                  onClick={resetToDefaultClasses}
+                  title="Reset to default classes"
+                >
+                  Reset
+                </Button>
+              </Box>
+              <Alert severity="info" sx={{ fontSize: '0.75rem' }}>
+                Add or remove classes for your specific use case. Default classes cover common TV/STB states and anomalies.
+              </Alert>
+            </Box>
+          </Collapse>
         </Box>
       );
     }

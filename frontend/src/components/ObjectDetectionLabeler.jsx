@@ -35,7 +35,8 @@ const ObjectDetectionLabeler = ({
   copiedAnnotations,
   onCopyAnnotations,
   showCopyPaste = false,
-  imageName = null
+  imageName = null,
+  customClasses = null
 }) => {
   const canvasRef = useRef(null);
   const imageRef = useRef(null); // Cache the loaded image
@@ -45,7 +46,9 @@ const ObjectDetectionLabeler = ({
   const [panStart, setPanStart] = useState(null);
   const [startPos, setStartPos] = useState(null);
   const [currentBox, setCurrentBox] = useState(null);
-  const [selectedClass, setSelectedClass] = useState('button');
+  // Use custom classes if provided, otherwise fall back to defaults
+  const availableClasses = customClasses || OBJECT_DETECTION_CLASSES;
+  const [selectedClass, setSelectedClass] = useState(Object.keys(availableClasses)[0] || 'button');
   const [boundingBoxes, setBoundingBoxes] = useState(labels?.boundingBoxes || []);
   
   // Debug logging for received labels and update boundingBoxes when labels change
@@ -194,7 +197,7 @@ const ObjectDetectionLabeler = ({
 
     // Draw existing bounding boxes
     boundingBoxes.forEach((box, index) => {
-      const cls = OBJECT_DETECTION_CLASSES[box.class];
+      const cls = availableClasses[box.class];
       ctx.strokeStyle = cls?.color || '#FF0000';
       ctx.lineWidth = 2;
       ctx.strokeRect(
@@ -378,11 +381,21 @@ const ObjectDetectionLabeler = ({
   const handleCopyAnnotations = () => {
     if (boundingBoxes.length === 0) return;
     
-    console.log('Copy - imageName prop:', imageName);
-    console.log('Copy - image prop:', image);
+    console.log('ObjectDetectionLabeler - Copy - imageName prop:', imageName);
+    console.log('ObjectDetectionLabeler - Copy - image prop (url):', typeof image === 'string' ? image.substring(0, 100) + '...' : image);
     
-    const finalImageName = imageName || image?.name || image?.filename || 'unknown';
-    console.log('Copy - final imageName used:', finalImageName);
+    // Try to extract filename from URL if imageName is not provided
+    let extractedName = imageName;
+    if (!extractedName && typeof image === 'string') {
+      // Try to extract filename from URL path
+      const urlMatch = image.match(/\/([^\/]+\.jpg)$/);
+      if (urlMatch) {
+        extractedName = urlMatch[1];
+      }
+    }
+    
+    const finalImageName = extractedName || 'unknown';
+    console.log('ObjectDetectionLabeler - Copy - final imageName used:', finalImageName);
     
     const annotationsToCopy = {
       boundingBoxes: boundingBoxes.map(box => ({ ...box })), // Deep copy
@@ -393,6 +406,7 @@ const ObjectDetectionLabeler = ({
       }
     };
     
+    console.log('ObjectDetectionLabeler - Copy - annotations to copy:', annotationsToCopy);
     onCopyAnnotations(annotationsToCopy);
   };
 
@@ -553,7 +567,7 @@ const ObjectDetectionLabeler = ({
                 onChange={(e) => setSelectedClass(e.target.value)}
                 size="small"
               >
-                {Object.entries(OBJECT_DETECTION_CLASSES).map(([key, cls]) => (
+                {Object.entries(availableClasses).map(([key, cls]) => (
                   <MenuItem key={key} value={key}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <Box
@@ -582,7 +596,7 @@ const ObjectDetectionLabeler = ({
                 </Typography>
               ) : (
                 boundingBoxes.map((box, index) => {
-                  const cls = OBJECT_DETECTION_CLASSES[box.class];
+                  const cls = availableClasses[box.class];
                   return (
                     <Box
                       key={box.id}

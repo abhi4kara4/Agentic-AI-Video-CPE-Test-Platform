@@ -299,21 +299,43 @@ const DatasetCreation = ({ onNotification }) => {
       
       if (images.length > 0) {
         // Create image objects with actual backend filenames and structure
-        const refreshedImages = images.map((img, index) => ({
-          id: Date.now() + index,
-          path: img.path,
-          filename: img.filename,
-          timestamp: new Date().toISOString(),
-          labels: img.annotation ? {
-            // Transform backend annotation structure to frontend labels structure
-            boundingBoxes: img.annotation.bounding_boxes || [],
-            notes: img.annotation.notes || '',
-            augmentationOptions: img.annotation.augmentation_options || {},
-            // Keep original annotation for reference
-            _originalAnnotation: img.annotation
-          } : null,
-          thumbnail: null // Will load from backend URL
-        }));
+        const refreshedImages = images.map((img, index) => {
+          // Extract timestamp from filename (format: capture_YYYYMMDD_HHMMSS_mmm.jpg)
+          let extractedTimestamp = null;
+          const filenameMatch = img.filename.match(/capture_(\d{8})_(\d{6})_(\d{3})\.jpg/);
+          if (filenameMatch) {
+            const [, dateStr, timeStr, msStr] = filenameMatch;
+            const year = dateStr.substring(0, 4);
+            const month = dateStr.substring(4, 6);
+            const day = dateStr.substring(6, 8);
+            const hour = timeStr.substring(0, 2);
+            const minute = timeStr.substring(2, 4);
+            const second = timeStr.substring(4, 6);
+            const ms = msStr;
+            
+            // Create ISO timestamp from filename parts
+            extractedTimestamp = `${year}-${month}-${day}T${hour}:${minute}:${second}.${ms}Z`;
+          }
+          
+          return {
+            id: Date.now() + index,
+            path: img.path,
+            filename: img.filename,
+            timestamp: extractedTimestamp || img.annotation?.labeled_at || new Date().toISOString(),
+            labels: img.annotation ? {
+              // Transform backend annotation structure to frontend labels structure
+              boundingBoxes: img.annotation.bounding_boxes || [],
+              notes: img.annotation.notes || '',
+              augmentationOptions: img.annotation.augmentation_options || {},
+              // Keep original annotation for reference
+              _originalAnnotation: img.annotation
+            } : null,
+            thumbnail: null // Will load from backend URL
+          };
+        });
+        
+        // Sort images by timestamp (newest first)
+        refreshedImages.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
         
         console.log('Transformed images:', refreshedImages); // Debug logging
         
@@ -541,7 +563,8 @@ const DatasetCreation = ({ onNotification }) => {
     setConfig(prev => ({
       ...prev,
       datasetType: typeConfig.datasetType,
-      augmentationOptions: typeConfig.augmentationOptions
+      augmentationOptions: typeConfig.augmentationOptions,
+      customClasses: typeConfig.customClasses
     }));
     setShowDatasetTypeSelector(false);
     
@@ -737,7 +760,11 @@ const DatasetCreation = ({ onNotification }) => {
         thumbnail: thumbnailData
       };
       
-      setCapturedImages(prev => [newImage, ...prev]);
+      setCapturedImages(prev => {
+        const updatedImages = [newImage, ...prev];
+        // Sort by timestamp (newest first) to maintain consistent order
+        return updatedImages.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+      });
       setCurrentStep(Math.max(currentStep, 3));
       
       onNotification({
@@ -1166,10 +1193,16 @@ const DatasetCreation = ({ onNotification }) => {
   // Copy/Paste and Multi-selection functions
   const handleCopyAnnotations = (annotations) => {
     setCopiedAnnotations(annotations);
+    
+    console.log('DatasetCreation - Copy annotations:', annotations);
+    console.log('DatasetCreation - Image name from annotations:', annotations.imageInfo?.imageName);
+    
+    const imageName = annotations.imageInfo?.imageName || 'unknown image';
+    
     onNotification({
       type: 'success',
       title: 'Annotations Copied',
-      message: `Copied ${annotations.boundingBoxes?.length || 0} bounding boxes from ${annotations.imageInfo?.imageName || 'image'}`
+      message: `Copied ${annotations.boundingBoxes?.length || 0} bounding boxes from ${imageName}`
     });
   };
 
@@ -2129,6 +2162,7 @@ const DatasetCreation = ({ onNotification }) => {
                   onCopyAnnotations={handleCopyAnnotations}
                   showCopyPaste={true}
                   imageName={selectedImage?.filename || selectedImage?.path?.split('/').pop() || 'unknown'}
+                  customClasses={config.customClasses?.object_detection}
                 />
               )}
               
@@ -2137,6 +2171,7 @@ const DatasetCreation = ({ onNotification }) => {
                   image={getImageUrls(selectedImage).fullImageUrl}
                   labels={currentLabels}
                   onLabelsChange={setCurrentLabels}
+                  customClasses={config.customClasses?.image_classification}
                 />
               )}
               
