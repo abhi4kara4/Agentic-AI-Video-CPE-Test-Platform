@@ -75,9 +75,16 @@ import { trainingAPI, testingAPI, videoAPI, wsManager } from '../services/api.js
 import { DATASET_TYPES, DATASET_TYPE_INFO } from '../constants/datasetTypes.js';
 
 // Component to draw bounding boxes on images
-const BoundingBoxVisualization = ({ imageUrl, detections }) => {
+const BoundingBoxVisualization = ({ imageUrl, detections, settings = {} }) => {
   const canvasRef = useRef(null);
   const imageRef = useRef(null);
+  const containerRef = useRef(null);
+  
+  // Zoom and pan state
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const [lastPanPoint, setLastPanPoint] = useState({ x: 0, y: 0 });
 
   useEffect(() => {
     if (!imageUrl || !detections || detections.length === 0) return;
@@ -90,38 +97,77 @@ const BoundingBoxVisualization = ({ imageUrl, detections }) => {
     const ctx = canvas.getContext('2d');
     
     const drawBoundingBoxes = () => {
-      canvas.width = image.naturalWidth;
-      canvas.height = image.naturalHeight;
+      const containerWidth = containerRef.current?.clientWidth || 800;
+      const containerHeight = containerRef.current?.clientHeight || 600;
+      
+      // Set canvas size to container size
+      canvas.width = containerWidth;
+      canvas.height = containerHeight;
       
       // Clear canvas
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       
+      // Calculate scaling to fit image in container
+      const scaleX = containerWidth / image.naturalWidth;
+      const scaleY = containerHeight / image.naturalHeight;
+      const baseScale = Math.min(scaleX, scaleY);
+      
+      // Apply zoom and pan transformations
+      ctx.save();
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.scale(baseScale * zoom, baseScale * zoom);
+      ctx.translate(pan.x, pan.y);
+      ctx.translate(-image.naturalWidth / 2, -image.naturalHeight / 2);
+      
       // Draw image
-      ctx.drawImage(image, 0, 0);
+      ctx.drawImage(image, 0, 0, image.naturalWidth, image.naturalHeight);
       
       // Draw bounding boxes
       detections.forEach((detection, index) => {
         const { bbox, class: className, confidence } = detection;
         const [x, y, width, height] = bbox;
         
-        // Generate color based on class
-        const colors = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff'];
+        // Generate color based on class index for consistency
+        const colors = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff', 
+                       '#ffa500', '#800080', '#008080', '#ffc0cb', '#a52a2a', '#dda0dd',
+                       '#20b2aa', '#87ceeb', '#98fb98', '#f0e68c', '#deb887'];
         const color = colors[index % colors.length];
         
-        // Draw bounding box
+        // Draw bounding box outline
         ctx.strokeStyle = color;
-        ctx.lineWidth = 3;
+        ctx.lineWidth = settings.outlineOnly ? 2 : 3;
         ctx.strokeRect(x, y, width, height);
         
-        // Draw label background
-        ctx.fillStyle = color;
-        ctx.fillRect(x, y - 25, ctx.measureText(`${className} ${(confidence * 100).toFixed(1)}%`).width + 10, 25);
-        
-        // Draw label text
-        ctx.fillStyle = '#ffffff';
-        ctx.font = '16px Arial';
-        ctx.fillText(`${className} ${(confidence * 100).toFixed(1)}%`, x + 5, y - 5);
+        // Only draw filled label background if not in outline-only mode
+        if (!settings.outlineOnly && settings.showLabels !== false) {
+          // Draw label background
+          ctx.fillStyle = color;
+          const labelText = `${className} ${(confidence * 100).toFixed(1)}%`;
+          const textWidth = ctx.measureText(labelText).width;
+          ctx.fillRect(x, y - 25, textWidth + 10, 25);
+          
+          // Draw label text
+          ctx.fillStyle = '#ffffff';
+          ctx.font = '16px Arial';
+          ctx.fillText(labelText, x + 5, y - 5);
+        } else if (settings.outlineOnly && settings.showLabels !== false) {
+          // In outline-only mode, draw label with outline/shadow for better visibility
+          const labelText = `${className} ${(confidence * 100).toFixed(1)}%`;
+          ctx.font = '16px Arial';
+          
+          // Draw text shadow/outline for better readability
+          ctx.strokeStyle = '#000000';
+          ctx.lineWidth = 3;
+          ctx.strokeText(labelText, x + 5, y - 5);
+          
+          // Draw label text
+          ctx.fillStyle = color;
+          ctx.fillText(labelText, x + 5, y - 5);
+        }
       });
+      
+      // Restore canvas transformation
+      ctx.restore();
     };
 
     if (image.complete) {
@@ -129,7 +175,63 @@ const BoundingBoxVisualization = ({ imageUrl, detections }) => {
     } else {
       image.onload = drawBoundingBoxes;
     }
-  }, [imageUrl, detections]);
+  }, [imageUrl, detections, settings, zoom, pan]);
+
+  // Zoom and pan handlers
+  const handleWheel = (e) => {
+    e.preventDefault();
+    const zoomSpeed = 0.1;
+    const delta = e.deltaY > 0 ? -zoomSpeed : zoomSpeed;
+    setZoom(prevZoom => Math.max(0.5, Math.min(5, prevZoom + delta)));
+  };
+
+  const handleMouseDown = (e) => {
+    if (zoom > 1) {
+      setIsPanning(true);
+      const rect = e.currentTarget.getBoundingClientRect();
+      setLastPanPoint({
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+      });
+    }
+  };
+
+  const handleMouseMove = (e) => {
+    if (isPanning && zoom > 1) {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const currentPoint = {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+      };
+      
+      const deltaX = currentPoint.x - lastPanPoint.x;
+      const deltaY = currentPoint.y - lastPanPoint.y;
+      
+      setPan(prevPan => ({
+        x: prevPan.x + deltaX / zoom,
+        y: prevPan.y + deltaY / zoom
+      }));
+      
+      setLastPanPoint(currentPoint);
+    }
+  };
+
+  const handleMouseUp = () => {
+    setIsPanning(false);
+  };
+
+  const handleZoomIn = () => {
+    setZoom(prevZoom => Math.min(5, prevZoom + 0.5));
+  };
+
+  const handleZoomOut = () => {
+    setZoom(prevZoom => Math.max(0.5, prevZoom - 0.5));
+  };
+
+  const handleResetZoom = () => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  };
 
   if (!imageUrl || !detections || detections.length === 0) {
     return <Alert severity="info">No detections to display</Alert>;
@@ -137,6 +239,53 @@ const BoundingBoxVisualization = ({ imageUrl, detections }) => {
 
   return (
     <Box sx={{ position: 'relative', maxWidth: '100%' }}>
+      {/* Zoom Controls */}
+      <Box sx={{ 
+        position: 'absolute', 
+        top: 8, 
+        right: 8, 
+        zIndex: 1000,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 1,
+        bgcolor: 'background.paper',
+        borderRadius: 1,
+        boxShadow: 2,
+        p: 1
+      }}>
+        <Button size="small" onClick={handleZoomIn} disabled={zoom >= 5}>
+          🔍+
+        </Button>
+        <Typography variant="caption" sx={{ textAlign: 'center', minWidth: 40 }}>
+          {Math.round(zoom * 100)}%
+        </Typography>
+        <Button size="small" onClick={handleZoomOut} disabled={zoom <= 0.5}>
+          🔍-
+        </Button>
+        <Button size="small" onClick={handleResetZoom} disabled={zoom === 1 && pan.x === 0 && pan.y === 0}>
+          ↺
+        </Button>
+      </Box>
+      
+      {/* Instructions */}
+      {zoom > 1 && (
+        <Box sx={{
+          position: 'absolute',
+          bottom: 8,
+          left: 8,
+          zIndex: 1000,
+          bgcolor: 'background.paper',
+          borderRadius: 1,
+          boxShadow: 2,
+          px: 1.5,
+          py: 0.5
+        }}>
+          <Typography variant="caption" color="text.secondary">
+            Drag to pan • Mouse wheel to zoom
+          </Typography>
+        </Box>
+      )}
+
       <img
         ref={imageRef}
         src={imageUrl}
@@ -144,15 +293,32 @@ const BoundingBoxVisualization = ({ imageUrl, detections }) => {
         style={{ width: '100%', height: 'auto', display: 'none' }}
         crossOrigin="anonymous"
       />
-      <canvas
-        ref={canvasRef}
+      
+      <div
+        ref={containerRef}
         style={{ 
           width: '100%', 
-          height: 'auto', 
+          height: '500px',
           border: '1px solid #ccc',
-          borderRadius: '4px'
+          borderRadius: '4px',
+          overflow: 'hidden',
+          cursor: zoom > 1 ? (isPanning ? 'grabbing' : 'grab') : 'default'
         }}
-      />
+        onWheel={handleWheel}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+      >
+        <canvas
+          ref={canvasRef}
+          style={{ 
+            display: 'block',
+            width: '100%',
+            height: '100%'
+          }}
+        />
+      </div>
     </Box>
   );
 };
@@ -501,6 +667,7 @@ const ModelTesting = ({ onNotification }) => {
     showBoundingBoxes: true,
     showLabels: true,
     showConfidence: true,
+    outlineOnly: false,
   });
   
   const [classificationSettings, setClassificationSettings] = useState({
@@ -1041,6 +1208,26 @@ const ModelTesting = ({ onNotification }) => {
                       }
                       label="Show Labels"
                     />
+                    
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={objectDetectionSettings.outlineOnly}
+                          onChange={(e) => setObjectDetectionSettings(prev => ({
+                            ...prev,
+                            outlineOnly: e.target.checked
+                          }))}
+                        />
+                      }
+                      label={
+                        <Box>
+                          <Typography variant="body2">Outline Only Mode</Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Show only colored outlines without filled backgrounds for better visibility of overlapping detections
+                          </Typography>
+                        </Box>
+                      }
+                    />
                   </CardContent>
                 </Card>
               </Grid>
@@ -1317,6 +1504,7 @@ const ModelTesting = ({ onNotification }) => {
                                 <BoundingBoxVisualization 
                                   imageUrl={result.results.image_url}
                                   detections={result.results.detections}
+                                  settings={objectDetectionSettings}
                                 />
                               )}
                               
