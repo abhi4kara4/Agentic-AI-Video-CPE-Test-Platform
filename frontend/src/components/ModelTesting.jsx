@@ -122,16 +122,29 @@ const BoundingBoxVisualization = ({ imageUrl, detections, settings = {} }) => {
       // Draw image
       ctx.drawImage(image, 0, 0, image.naturalWidth, image.naturalHeight);
       
+      // Create class-to-color mapping for consistent colors
+      const classColors = {};
+      const colors = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff', 
+                     '#ffa500', '#800080', '#008080', '#ffc0cb', '#a52a2a', '#dda0dd',
+                     '#20b2aa', '#87ceeb', '#98fb98', '#f0e68c', '#deb887'];
+      
+      // Assign colors to classes if using class-based coloring
+      if (settings.colorByClass) {
+        const uniqueClasses = [...new Set(detections.map(d => d.class))];
+        uniqueClasses.forEach((className, index) => {
+          classColors[className] = colors[index % colors.length];
+        });
+      }
+      
       // Draw bounding boxes
       detections.forEach((detection, index) => {
         const { bbox, class: className, confidence } = detection;
         const [x, y, width, height] = bbox;
         
-        // Generate color based on class index for consistency
-        const colors = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff', 
-                       '#ffa500', '#800080', '#008080', '#ffc0cb', '#a52a2a', '#dda0dd',
-                       '#20b2aa', '#87ceeb', '#98fb98', '#f0e68c', '#deb887'];
-        const color = colors[index % colors.length];
+        // Choose color based on settings
+        const color = settings.colorByClass 
+          ? classColors[className] 
+          : colors[index % colors.length];
         
         // Draw bounding box outline
         ctx.strokeStyle = color;
@@ -668,6 +681,7 @@ const ModelTesting = ({ onNotification }) => {
     showLabels: true,
     showConfidence: true,
     outlineOnly: false,
+    colorByClass: true, // New option for class-based coloring
   });
   
   const [classificationSettings, setClassificationSettings] = useState({
@@ -1228,6 +1242,26 @@ const ModelTesting = ({ onNotification }) => {
                         </Box>
                       }
                     />
+                    
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={objectDetectionSettings.colorByClass}
+                          onChange={(e) => setObjectDetectionSettings(prev => ({
+                            ...prev,
+                            colorByClass: e.target.checked
+                          }))}
+                        />
+                      }
+                      label={
+                        <Box>
+                          <Typography variant="body2">Color by Class</Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Use consistent colors for each class instead of different colors for each detection
+                          </Typography>
+                        </Box>
+                      }
+                    />
                   </CardContent>
                 </Card>
               </Grid>
@@ -1600,6 +1634,49 @@ const ModelTesting = ({ onNotification }) => {
                                   </TableBody>
                                 </Table>
                               </Box>
+                              
+                              {/* Detection Summary Table for Object Detection */}
+                              {result.modelType === 'object_detection' && result.results.detections && result.results.detections.length > 0 && (
+                                <Box sx={{ mb: 2 }}>
+                                  <Typography variant="subtitle2" color="primary" gutterBottom>
+                                    Detection Summary
+                                  </Typography>
+                                  <Table size="small">
+                                    <TableHead>
+                                      <TableRow>
+                                        <TableCell>Class</TableCell>
+                                        <TableCell align="right">Count</TableCell>
+                                        <TableCell align="right">Avg Confidence</TableCell>
+                                      </TableRow>
+                                    </TableHead>
+                                    <TableBody>
+                                      {(() => {
+                                        const classStats = result.results.detections.reduce((acc, detection) => {
+                                          const className = detection.class;
+                                          if (!acc[className]) {
+                                            acc[className] = { count: 0, totalConfidence: 0 };
+                                          }
+                                          acc[className].count += 1;
+                                          acc[className].totalConfidence += detection.confidence;
+                                          return acc;
+                                        }, {});
+                                        
+                                        return Object.entries(classStats)
+                                          .sort(([,a], [,b]) => b.count - a.count)
+                                          .map(([className, stats]) => (
+                                            <TableRow key={className}>
+                                              <TableCell>{className}</TableCell>
+                                              <TableCell align="right">{stats.count}</TableCell>
+                                              <TableCell align="right">
+                                                {(stats.totalConfidence / stats.count * 100).toFixed(1)}%
+                                              </TableCell>
+                                            </TableRow>
+                                          ));
+                                      })()}
+                                    </TableBody>
+                                  </Table>
+                                </Box>
+                              )}
                               
                               {/* Detailed Results */}
                               <Box>

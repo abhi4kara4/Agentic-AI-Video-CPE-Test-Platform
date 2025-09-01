@@ -2286,6 +2286,92 @@ async def list_models_alias():
         return {"models": []}
 
 
+def get_plot_type(filename: str) -> dict:
+    """Determine the type and description of a training plot file"""
+    plot_types = {
+        "results.png": {
+            "category": "training_summary", 
+            "title": "Training Results Summary",
+            "description": "Overall training metrics including loss, precision, recall, and mAP curves over epochs"
+        },
+        "confusion_matrix.png": {
+            "category": "performance", 
+            "title": "Confusion Matrix",
+            "description": "Shows how well the model distinguishes between different classes"
+        },
+        "confusion_matrix_normalized.png": {
+            "category": "performance", 
+            "title": "Normalized Confusion Matrix", 
+            "description": "Confusion matrix with values normalized to show percentage accuracy per class"
+        },
+        "F1_curve.png": {
+            "category": "metrics", 
+            "title": "F1 Score Curve",
+            "description": "F1 score vs confidence threshold - shows optimal confidence threshold"
+        },
+        "P_curve.png": {
+            "category": "metrics", 
+            "title": "Precision Curve",
+            "description": "Precision vs confidence threshold for all classes"
+        },
+        "R_curve.png": {
+            "category": "metrics", 
+            "title": "Recall Curve", 
+            "description": "Recall vs confidence threshold for all classes"
+        },
+        "PR_curve.png": {
+            "category": "metrics", 
+            "title": "Precision-Recall Curve",
+            "description": "Precision vs Recall curve showing model performance across confidence thresholds"
+        },
+        "BoxF1_curve.png": {
+            "category": "detection", 
+            "title": "Bounding Box F1 Curve",
+            "description": "F1 score for bounding box predictions vs confidence threshold"
+        },
+        "BoxP_curve.png": {
+            "category": "detection", 
+            "title": "Bounding Box Precision Curve",
+            "description": "Precision for bounding box predictions vs confidence threshold"
+        },
+        "BoxR_curve.png": {
+            "category": "detection", 
+            "title": "Bounding Box Recall Curve",
+            "description": "Recall for bounding box predictions vs confidence threshold"
+        },
+        "BoxPR_curve.png": {
+            "category": "detection", 
+            "title": "Bounding Box Precision-Recall Curve",
+            "description": "Precision vs Recall for bounding box predictions"
+        },
+        "labels.jpg": {
+            "category": "dataset", 
+            "title": "Dataset Label Distribution",
+            "description": "Shows the distribution of classes in your training dataset"
+        },
+        "labels_correlogram.jpg": {
+            "category": "dataset", 
+            "title": "Label Correlation Matrix",
+            "description": "Shows correlations between different classes in the dataset"
+        },
+        "train_batch0.jpg": {
+            "category": "samples", 
+            "title": "Training Batch Sample",
+            "description": "Sample images from the training dataset with ground truth labels"
+        },
+        "val_batch0_pred.jpg": {
+            "category": "samples", 
+            "title": "Validation Predictions Sample",
+            "description": "Sample validation images with model predictions vs ground truth"
+        }
+    }
+    
+    return plot_types.get(filename, {
+        "category": "other",
+        "title": filename,
+        "description": "Training artifact file"
+    })
+
 @app.get("/models/{model_name}/details")
 async def get_model_details(model_name: str):
     """Get detailed information about a specific trained model"""
@@ -2327,6 +2413,76 @@ async def get_model_details(model_name: str):
             }
         
         training_results = model_data.get("training_results", {})
+        results_dir = training_results.get("results_dir")
+        
+        # Scan for training artifacts
+        artifacts = {}
+        epoch_metrics = []
+        
+        if results_dir and Path(results_dir).exists():
+            results_path = Path(results_dir)
+            
+            # Look for training plots/charts
+            plot_files = []
+            common_plots = [
+                "results.png", "confusion_matrix.png", "confusion_matrix_normalized.png",
+                "F1_curve.png", "P_curve.png", "R_curve.png", "PR_curve.png",
+                "BoxF1_curve.png", "BoxP_curve.png", "BoxR_curve.png", "BoxPR_curve.png",
+                "labels.jpg", "labels_correlogram.jpg", "train_batch0.jpg", "val_batch0_pred.jpg"
+            ]
+            
+            for plot_file in common_plots:
+                plot_path = results_path / plot_file
+                if plot_path.exists():
+                    plot_files.append({
+                        "name": plot_file,
+                        "path": str(plot_path),
+                        "size": plot_path.stat().st_size,
+                        "type": get_plot_type(plot_file)
+                    })
+            
+            artifacts["training_plots"] = plot_files
+            
+            # Look for results.csv with epoch-by-epoch metrics
+            results_csv = results_path / "results.csv"
+            if results_csv.exists():
+                try:
+                    import csv
+                    with open(results_csv, 'r') as f:
+                        csv_reader = csv.DictReader(f)
+                        for row in csv_reader:
+                            # Clean up the row data and convert to appropriate types
+                            clean_row = {}
+                            for key, value in row.items():
+                                key = key.strip()
+                                if key and value:
+                                    try:
+                                        # Try to convert to float for numeric values
+                                        clean_row[key] = float(value)
+                                    except ValueError:
+                                        clean_row[key] = value.strip()
+                            if clean_row:
+                                epoch_metrics.append(clean_row)
+                    
+                    artifacts["metrics_file"] = {
+                        "name": "results.csv",
+                        "path": str(results_csv),
+                        "size": results_csv.stat().st_size,
+                        "total_epochs": len(epoch_metrics)
+                    }
+                except Exception as e:
+                    log.warning(f"Error reading results.csv: {e}")
+            
+            # Look for training configuration
+            config_files = ["args.yaml", "opt.yaml", "hyp.yaml"]
+            for config_file in config_files:
+                config_path = results_path / config_file
+                if config_path.exists():
+                    artifacts[f"config_{config_file.split('.')[0]}"] = {
+                        "name": config_file,
+                        "path": str(config_path),
+                        "size": config_path.stat().st_size
+                    }
         
         response = {
             "name": model_data.get("name"),
@@ -2338,7 +2494,10 @@ async def get_model_details(model_name: str):
             "training_results": training_results,
             "model_files": files_info,
             "metadata_path": str(metadata_file),
-            # Add more detailed training metrics
+            # Enhanced training artifacts
+            "artifacts": artifacts,
+            "epoch_metrics": epoch_metrics,
+            # Existing metrics for backward compatibility
             "metrics": {
                 "training_time": training_results.get("training_time", 0),
                 "epochs_completed": training_results.get("epochs_completed", 0),
@@ -2355,6 +2514,58 @@ async def get_model_details(model_name: str):
     except Exception as e:
         log.error(f"Error reading model metadata: {e}")
         raise HTTPException(status_code=500, detail=f"Error reading model metadata: {str(e)}")
+
+
+@app.get("/models/{model_name}/artifacts/{artifact_name}")
+async def get_model_artifact(model_name: str, artifact_name: str):
+    """Serve training artifact files (charts, plots, etc.)"""
+    log.info(f"Serving artifact {artifact_name} for model {model_name}")
+    
+    model_dir = TRAINING_DIR / "models" / model_name
+    metadata_file = model_dir / "metadata.json"
+    
+    if not metadata_file.exists():
+        raise HTTPException(status_code=404, detail="Model not found")
+    
+    try:
+        with open(metadata_file) as f:
+            model_data = json.load(f)
+        
+        training_results = model_data.get("training_results", {})
+        results_dir = training_results.get("results_dir")
+        
+        if not results_dir or not Path(results_dir).exists():
+            raise HTTPException(status_code=404, detail="Training results directory not found")
+        
+        artifact_path = Path(results_dir) / artifact_name
+        
+        if not artifact_path.exists():
+            raise HTTPException(status_code=404, detail=f"Artifact {artifact_name} not found")
+        
+        # Determine media type based on file extension
+        media_types = {
+            '.png': 'image/png',
+            '.jpg': 'image/jpeg', 
+            '.jpeg': 'image/jpeg',
+            '.csv': 'text/csv',
+            '.yaml': 'text/yaml',
+            '.yml': 'text/yaml',
+            '.txt': 'text/plain',
+            '.log': 'text/plain'
+        }
+        
+        file_ext = artifact_path.suffix.lower()
+        media_type = media_types.get(file_ext, 'application/octet-stream')
+        
+        return FileResponse(
+            path=str(artifact_path),
+            media_type=media_type,
+            filename=artifact_name
+        )
+        
+    except Exception as e:
+        log.error(f"Error serving artifact: {e}")
+        raise HTTPException(status_code=500, detail=f"Error serving artifact: {str(e)}")
 
 
 @app.get("/models/{model_name}/download")

@@ -52,6 +52,8 @@ import {
   Storage as DatasetIcon,
   Settings as ConfigIcon,
   Assessment as TestIcon,
+  Timeline as TimelineIcon,
+  Assessment as AssessmentIcon,
 } from '@mui/icons-material';
 import { trainingAPI, datasetAPI, wsManager } from '../services/api.jsx';
 import { DATASET_TYPES, DATASET_TYPE_INFO } from '../constants/datasetTypes.js';
@@ -293,6 +295,7 @@ const ModelTraining = ({ onNotification }) => {
   const [modelDetailsDialog, setModelDetailsDialog] = useState(false);
   const [selectedModelForDetails, setSelectedModelForDetails] = useState(null);
   const [modelDetails, setModelDetails] = useState(null);
+  const [detailsActiveTab, setDetailsActiveTab] = useState(0);
   const [downloadMenuAnchor, setDownloadMenuAnchor] = useState(null);
   const [selectedModelForDownload, setSelectedModelForDownload] = useState(null);
 
@@ -1149,174 +1152,213 @@ const ModelTraining = ({ onNotification }) => {
         </DialogActions>
       </Dialog>
 
-      {/* Model Details Dialog */}
+      {/* Enhanced Model Details Dialog */}
       <Dialog
         open={modelDetailsDialog}
         onClose={() => setModelDetailsDialog(false)}
-        maxWidth="md"
+        maxWidth="xl"
         fullWidth
+        PaperProps={{
+          sx: { height: '90vh' }
+        }}
       >
         <DialogTitle>
-          Model Details: {selectedModelForDetails?.name}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Typography variant="h5" fontWeight="bold">
+              {selectedModelForDetails?.name}
+            </Typography>
+            {modelDetails && (
+              <Chip 
+                label={DATASET_TYPE_INFO[modelDetails.dataset_type]?.name || modelDetails.dataset_type}
+                color="primary"
+                size="small"
+              />
+            )}
+          </Box>
         </DialogTitle>
-        <DialogContent>
+        <DialogContent sx={{ p: 0 }}>
           {modelDetails ? (
-            <Grid container spacing={3}>
-              {/* Basic Information */}
-              <Grid item xs={12}>
-                <Card>
-                  <CardContent>
-                    <Typography variant="h6" gutterBottom>
-                      Basic Information
-                    </Typography>
-                    <Table size="small">
-                      <TableBody>
-                        <TableRow>
-                          <TableCell><strong>Model Name</strong></TableCell>
-                          <TableCell>{modelDetails.name}</TableCell>
-                        </TableRow>
-                        <TableRow>
-                          <TableCell><strong>Model Type</strong></TableCell>
-                          <TableCell>
-                            <Chip 
-                              label={DATASET_TYPE_INFO[modelDetails.type]?.name || modelDetails.type}
-                              color={getDatasetTypeColor(modelDetails.type)}
-                              size="small"
+            <Box sx={{ height: '100%' }}>
+              {/* Navigation Tabs */}
+              <Tabs 
+                value={detailsActiveTab} 
+                onChange={(e, newValue) => setDetailsActiveTab(newValue)}
+                variant="scrollable"
+                scrollButtons="auto"
+                sx={{ borderBottom: 1, borderColor: 'divider', px: 2 }}
+              >
+                <Tab label="Overview" icon={<ConfigIcon />} />
+                <Tab label="Training Charts" icon={<MetricsIcon />} />
+                <Tab label="Performance Analysis" icon={<AssessmentIcon />} />
+                <Tab label="Dataset Info" icon={<DatasetIcon />} />
+                <Tab label="Training Logs" icon={<TimelineIcon />} />
+              </Tabs>
+
+              {/* Tab Content */}
+              <Box sx={{ p: 3, height: 'calc(100% - 48px)', overflow: 'auto' }}>
+                {/* Overview Tab */}
+                {detailsActiveTab === 0 && (
+                  <Grid container spacing={3}>
+                    {/* Training Summary */}
+                    <Grid item xs={12}>
+                      <Card>
+                        <CardContent>
+                          <Typography variant="h6" gutterBottom>
+                            Training Summary
+                          </Typography>
+                          <Grid container spacing={2}>
+                            <Grid item xs={12} md={6}>
+                              <Table size="small">
+                                <TableBody>
+                                  <TableRow>
+                                    <TableCell><strong>Model Name</strong></TableCell>
+                                    <TableCell>{modelDetails.name}</TableCell>
+                                  </TableRow>
+                                  <TableRow>
+                                    <TableCell><strong>Base Model</strong></TableCell>
+                                    <TableCell>{modelDetails.base_model || 'N/A'}</TableCell>
+                                  </TableRow>
+                                  <TableRow>
+                                    <TableCell><strong>Dataset</strong></TableCell>
+                                    <TableCell>{modelDetails.dataset_name || 'N/A'}</TableCell>
+                                  </TableRow>
+                                  <TableRow>
+                                    <TableCell><strong>Training Status</strong></TableCell>
+                                    <TableCell>
+                                      <Chip 
+                                        label={modelDetails.status || 'Unknown'}
+                                        color={modelDetails.status === 'completed' ? 'success' : 'warning'}
+                                        size="small"
+                                      />
+                                    </TableCell>
+                                  </TableRow>
+                                </TableBody>
+                              </Table>
+                            </Grid>
+                            <Grid item xs={12} md={6}>
+                              <Table size="small">
+                                <TableBody>
+                                  <TableRow>
+                                    <TableCell><strong>Created</strong></TableCell>
+                                    <TableCell>{new Date(modelDetails.created_at).toLocaleString()}</TableCell>
+                                  </TableRow>
+                                  <TableRow>
+                                    <TableCell><strong>Training Time</strong></TableCell>
+                                    <TableCell>
+                                      {modelDetails.metrics?.training_time ? 
+                                        `${Math.round(modelDetails.metrics.training_time)}s` : 'N/A'}
+                                    </TableCell>
+                                  </TableRow>
+                                  <TableRow>
+                                    <TableCell><strong>Epochs Completed</strong></TableCell>
+                                    <TableCell>{modelDetails.metrics?.epochs_completed || 'N/A'}</TableCell>
+                                  </TableRow>
+                                  <TableRow>
+                                    <TableCell><strong>Final mAP@0.5</strong></TableCell>
+                                    <TableCell>
+                                      {modelDetails.metrics?.final_map ? 
+                                        `${(modelDetails.metrics.final_map * 100).toFixed(2)}%` : 'N/A'}
+                                    </TableCell>
+                                  </TableRow>
+                                </TableBody>
+                              </Table>
+                            </Grid>
+                          </Grid>
+                        </CardContent>
+                      </Card>
+                    </Grid>
+
+                    {/* Key Metrics */}
+                    {modelDetails.epoch_metrics && modelDetails.epoch_metrics.length > 0 && (
+                      <Grid item xs={12}>
+                        <Card>
+                          <CardContent>
+                            <Typography variant="h6" gutterBottom>
+                              Training Progress
+                            </Typography>
+                            <Box sx={{ height: 300 }}>
+                              <ResponsiveContainer width="100%" height={300}>
+                                <LineChart data={modelDetails.epoch_metrics.slice(-20)}>
+                                <CartesianGrid strokeDasharray="3 3" />
+                                <XAxis dataKey="epoch" />
+                                <YAxis />
+                                <Tooltip />
+                                <Legend />
+                                {modelDetails.epoch_metrics[0]?.['train/box_loss'] !== undefined && (
+                                  <Line type="monotone" dataKey="train/box_loss" stroke="#8884d8" name="Box Loss" />
+                                )}
+                                {modelDetails.epoch_metrics[0]?.['train/cls_loss'] !== undefined && (
+                                  <Line type="monotone" dataKey="train/cls_loss" stroke="#82ca9d" name="Class Loss" />
+                                )}
+                                {modelDetails.epoch_metrics[0]?.['val/mAP50'] !== undefined && (
+                                  <Line type="monotone" dataKey="val/mAP50" stroke="#ffc658" name="mAP@0.5" />
+                                )}
+                                </LineChart>
+                              </ResponsiveContainer>
+                            </Box>
+                          </CardContent>
+                        </Card>
+                      </Grid>
+                    )}
+                  </Grid>
+                )}
+
+                {/* Training Charts Tab */}
+                {detailsActiveTab === 1 && (
+                  <Grid container spacing={3}>
+                    {modelDetails.artifacts?.training_plots?.map((plot, index) => (
+                      <Grid item xs={12} md={6} key={index}>
+                        <Card>
+                          <CardContent>
+                            <Typography variant="h6" gutterBottom>
+                              {plot.type.title}
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                              {plot.type.description}
+                            </Typography>
+                            <CardMedia
+                              component="img"
+                              image={`/api/models/${modelDetails.name}/artifacts/${plot.name}`}
+                              alt={plot.type.title}
+                              sx={{ 
+                                maxHeight: 400,
+                                objectFit: 'contain',
+                                border: '1px solid #e0e0e0',
+                                borderRadius: 1
+                              }}
                             />
-                          </TableCell>
-                        </TableRow>
-                        <TableRow>
-                          <TableCell><strong>Created</strong></TableCell>
-                          <TableCell>{new Date(modelDetails.created_at || selectedModelForDetails?.createdAt).toLocaleString()}</TableCell>
-                        </TableRow>
-                        <TableRow>
-                          <TableCell><strong>Model Size</strong></TableCell>
-                          <TableCell>{modelDetails.size || 'N/A'}</TableCell>
-                        </TableRow>
-                        <TableRow>
-                          <TableCell><strong>Base Model</strong></TableCell>
-                          <TableCell>{modelDetails.base_model || 'N/A'}</TableCell>
-                        </TableRow>
-                      </TableBody>
-                    </Table>
-                  </CardContent>
-                </Card>
-              </Grid>
+                            <Box sx={{ mt: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <Chip 
+                                label={plot.type.category}
+                                size="small"
+                                variant="outlined"
+                              />
+                              <Typography variant="caption" color="text.secondary">
+                                {(plot.size / 1024).toFixed(1)} KB
+                              </Typography>
+                            </Box>
+                          </CardContent>
+                        </Card>
+                      </Grid>
+                    ))}
+                    {(!modelDetails.artifacts?.training_plots || modelDetails.artifacts.training_plots.length === 0) && (
+                      <Grid item xs={12}>
+                        <Alert severity="info">
+                          No training charts available for this model.
+                        </Alert>
+                      </Grid>
+                    )}
+                  </Grid>
+                )}
 
-              {/* Training Configuration */}
-              {modelDetails.training_config && (
-                <Grid item xs={12} md={6}>
-                  <Card>
-                    <CardContent>
-                      <Typography variant="h6" gutterBottom>
-                        Training Configuration
-                      </Typography>
-                      <Table size="small">
-                        <TableBody>
-                          <TableRow>
-                            <TableCell><strong>Epochs</strong></TableCell>
-                            <TableCell>{modelDetails.training_config.epochs || 'N/A'}</TableCell>
-                          </TableRow>
-                          <TableRow>
-                            <TableCell><strong>Batch Size</strong></TableCell>
-                            <TableCell>{modelDetails.training_config.batch_size || 'N/A'}</TableCell>
-                          </TableRow>
-                          <TableRow>
-                            <TableCell><strong>Learning Rate</strong></TableCell>
-                            <TableCell>{modelDetails.training_config.learning_rate || 'N/A'}</TableCell>
-                          </TableRow>
-                          <TableRow>
-                            <TableCell><strong>Image Size</strong></TableCell>
-                            <TableCell>{modelDetails.training_config.image_size || 'N/A'}</TableCell>
-                          </TableRow>
-                        </TableBody>
-                      </Table>
-                    </CardContent>
-                  </Card>
-                </Grid>
-              )}
-
-              {/* Performance Metrics */}
-              {modelDetails.metrics && (
-                <Grid item xs={12} md={6}>
-                  <Card>
-                    <CardContent>
-                      <Typography variant="h6" gutterBottom>
-                        Performance Metrics
-                      </Typography>
-                      <Table size="small">
-                        <TableBody>
-                          <TableRow>
-                            <TableCell><strong>Training Time</strong></TableCell>
-                            <TableCell>{modelDetails.metrics.training_time || 'N/A'}</TableCell>
-                          </TableRow>
-                          <TableRow>
-                            <TableCell><strong>Final Loss</strong></TableCell>
-                            <TableCell>{modelDetails.metrics.final_loss?.toFixed(4) || 'N/A'}</TableCell>
-                          </TableRow>
-                          {modelDetails.type === 'object_detection' && modelDetails.metrics.mAP && (
-                            <TableRow>
-                              <TableCell><strong>mAP@0.5</strong></TableCell>
-                              <TableCell>{(modelDetails.metrics.mAP * 100).toFixed(1)}%</TableCell>
-                            </TableRow>
-                          )}
-                          {(modelDetails.type === 'image_classification' || modelDetails.type === 'vision_llm') && modelDetails.metrics.accuracy && (
-                            <TableRow>
-                              <TableCell><strong>Accuracy</strong></TableCell>
-                              <TableCell>{(modelDetails.metrics.accuracy * 100).toFixed(1)}%</TableCell>
-                            </TableRow>
-                          )}
-                          <TableRow>
-                            <TableCell><strong>Dataset Used</strong></TableCell>
-                            <TableCell>{modelDetails.dataset_name || 'N/A'}</TableCell>
-                          </TableRow>
-                        </TableBody>
-                      </Table>
-                    </CardContent>
-                  </Card>
-                </Grid>
-              )}
-
-              {/* Files Information */}
-              <Grid item xs={12}>
-                <Card>
-                  <CardContent>
-                    <Typography variant="h6" gutterBottom>
-                      Model Files
-                    </Typography>
-                    <List dense>
-                      <ListItem>
-                        <ListItemText
-                          primary="Model Weights"
-                          secondary={`${modelDetails.name}.pt - PyTorch model file`}
-                        />
-                      </ListItem>
-                      <ListItem>
-                        <ListItemText
-                          primary="Configuration"
-                          secondary="config.yaml - Training configuration"
-                        />
-                      </ListItem>
-                      <ListItem>
-                        <ListItemText
-                          primary="Metadata"
-                          secondary="metadata.json - Model metadata and metrics"
-                        />
-                      </ListItem>
-                    </List>
-                  </CardContent>
-                </Card>
-              </Grid>
-
-              {/* Error Message */}
-              {modelDetails.error && (
-                <Grid item xs={12}>
-                  <Alert severity="warning">
-                    {modelDetails.error}
+                {/* Other tabs will be implemented here */}
+                {detailsActiveTab > 1 && (
+                  <Alert severity="info">
+                    This section is under development. More detailed analysis coming soon!
                   </Alert>
-                </Grid>
-              )}
-            </Grid>
+                )}
+              </Box>
+            </Box>
           ) : (
             <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
               <CircularProgress />
