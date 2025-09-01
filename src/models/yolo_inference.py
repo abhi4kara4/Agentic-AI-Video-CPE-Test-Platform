@@ -10,6 +10,7 @@ import time
 import base64
 from PIL import Image
 import io
+import os
 
 try:
     from ultralytics import YOLO
@@ -333,12 +334,15 @@ class ModelManager:
             
             # Handle different input types
             if isinstance(image_data, str):
-                # Base64 or file path
-                if image_data.startswith("data:") or len(image_data) > 100:
-                    # Base64
+                # Check if it's a file path first (most common case)
+                if os.path.exists(image_data):
+                    # It's a valid file path
+                    return model.predict_file(image_data, **kwargs)
+                elif image_data.startswith("data:") or len(image_data) > 100:
+                    # Base64 - either has data: prefix or is a long string
                     return model.predict_base64(image_data, **kwargs)
                 else:
-                    # File path
+                    # Short string that's not a file - try as file path anyway
                     return model.predict_file(image_data, **kwargs)
             elif isinstance(image_data, np.ndarray):
                 # NumPy array

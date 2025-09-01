@@ -3200,7 +3200,9 @@ async def test_model_with_upload(
             from src.models.yolo_inference import test_yolo_model
             
             # Run real YOLO inference on uploaded image
-            yolo_result = await test_yolo_model(model_name, str(image_path), return_visualization=True)
+            # Ensure we pass the absolute path as a string
+            image_path_str = str(image_path.absolute())
+            yolo_result = await test_yolo_model(model_name, image_path_str, return_visualization=True)
             
             end_time = datetime.now()
             processing_time = (end_time - start_time).total_seconds()
