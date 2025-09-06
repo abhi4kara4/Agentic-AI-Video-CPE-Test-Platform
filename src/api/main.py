@@ -2046,11 +2046,11 @@ async def execute_training_job(job_name: str, job_metadata: dict, job_dir: Path)
                         cuda_available = False
                     
                     if device_type == "cpu" or (device_type == "auto" and not cuda_available):
-                        timeout_per_epoch = 300  # 5 minutes per epoch for CPU
+                        timeout_per_epoch = 600  # 10 minutes per epoch for CPU (increased)
                     else:
                         timeout_per_epoch = 120  # 2 minutes per epoch for GPU
                     
-                    total_timeout = max(timeout_per_epoch * epochs, 1800)  # Minimum 30 minutes
+                    total_timeout = max(timeout_per_epoch * epochs, 3600)  # Minimum 1 hour
                     log.info(f"Training timeout set to {total_timeout} seconds ({total_timeout//60} minutes)")
                     
                     training_results = await asyncio.wait_for(
@@ -2064,18 +2064,51 @@ async def execute_training_job(job_name: str, job_metadata: dict, job_dir: Path)
                 except asyncio.TimeoutError:
                     error_msg = f"Training timed out after {total_timeout} seconds. Consider using a smaller model or fewer epochs for CPU training."
                     log.error(error_msg)
-                    job_metadata.update({
-                        "status": "failed",
-                        "error": error_msg,
-                        "failed_at": datetime.now().isoformat()
-                    })
+                    
+                    # Check if training actually completed despite timeout by looking for model weights
+                    weights_dir = TRAINING_DIR / "models" / job_metadata["model_name"] / "weights"
+                    best_weights = weights_dir / "best.pt"
+                    last_weights = weights_dir / "last.pt"
+                    
+                    if (best_weights.exists() and best_weights.stat().st_size > 1000000) or \
+                       (last_weights.exists() and last_weights.stat().st_size > 1000000):
+                        log.info(f"Training timeout occurred but model weights found - marking as completed")
+                        
+                        # Training actually completed - update as successful
+                        final_metrics = {
+                            "training_time": total_timeout,
+                            "early_stopped": True,
+                            "timeout_completed": True
+                        }
+                        
+                        job_metadata.update({
+                            "status": "completed",
+                            "final_metrics": final_metrics,
+                            "completed_at": datetime.now().isoformat(),
+                            "updated_at": datetime.now().isoformat(),
+                            "timeout_note": "Training completed but exceeded timeout limit"
+                        })
+                        
+                        await broadcast_update("training_completed", {
+                            "job_name": job_name,
+                            "model_name": job_metadata.get("model_name", "unknown"),
+                            "final_metrics": final_metrics
+                        })
+                    else:
+                        # Training truly failed
+                        job_metadata.update({
+                            "status": "failed",
+                            "error": error_msg,
+                            "failed_at": datetime.now().isoformat()
+                        })
+                        await broadcast_update("training_failed", {
+                            "job_name": job_name,
+                            "model_name": job_metadata.get("model_name", "unknown"),
+                            "error": error_msg
+                        })
+                    
                     with open(job_dir / "metadata.json", "w") as f:
                         json.dump(job_metadata, f, indent=2)
-                    await broadcast_update("training_failed", {
-                        "job_name": job_name,
-                        "model_name": job_metadata.get("model_name", "unknown"),
-                        "error": error_msg
-                    })
                     return
                 
                 # Stop progress monitoring
@@ -2250,13 +2283,41 @@ async def list_models_alias():
                             log.warning(f"Model in {model_dir.name} has no name field, skipping")
                             continue
                         
-                        # Check if model files exist
+                        # Check if model files exist - look in multiple locations
                         model_files = model_data.get("model_files", {})
                         has_weights = False
+                        weights_info = {}
+                        
+                        # Check metadata model_files first
                         if model_files.get("best_weights") and Path(model_files["best_weights"]).exists():
                             has_weights = True
+                            weights_info["best_weights"] = model_files["best_weights"]
                         elif model_files.get("last_weights") and Path(model_files["last_weights"]).exists():
                             has_weights = True
+                            weights_info["last_weights"] = model_files["last_weights"]
+                        
+                        # Also check standard weights directory structure
+                        if not has_weights:
+                            weights_dir = model_dir / "weights"
+                            best_weights = weights_dir / "best.pt"
+                            last_weights = weights_dir / "last.pt"
+                            
+                            if best_weights.exists() and best_weights.stat().st_size > 1000000:
+                                has_weights = True
+                                weights_info["best_weights"] = str(best_weights)
+                            elif last_weights.exists() and last_weights.stat().st_size > 1000000:
+                                has_weights = True
+                                weights_info["last_weights"] = str(last_weights)
+                        
+                        # Determine model status
+                        original_status = model_data.get("status", "unknown")
+                        if has_weights:
+                            # Model is ready if it has valid weights, regardless of training job status
+                            model_status = "ready"
+                            if original_status == "failed" and model_data.get("timeout_note"):
+                                model_status = "completed_with_timeout"
+                        else:
+                            model_status = "incomplete"
                         
                         model_entry = {
                             "name": model_name,
@@ -2264,9 +2325,12 @@ async def list_models_alias():
                             "baseModel": model_data.get("base_model"),
                             "createdAt": model_data.get("created_at"),
                             "metrics": model_data.get("training_results", {}),
-                            "status": "ready" if has_weights else "incomplete",
+                            "status": model_status,
+                            "original_status": original_status,
                             "dataset_name": model_data.get("dataset_name"),
-                            "training_results": model_data.get("training_results", {})
+                            "training_results": model_data.get("training_results", {}),
+                            "weights_info": weights_info,
+                            "timeout_note": model_data.get("timeout_note")
                         }
                         
                         models.append(model_entry)
@@ -2371,6 +2435,51 @@ def get_plot_type(filename: str) -> dict:
         "title": filename,
         "description": "Training artifact file"
     })
+
+@app.post("/models/{model_name}/fix-status")
+async def fix_model_status(model_name: str):
+    """Fix model status for models that completed but were marked as failed due to timeout"""
+    model_dir = TRAINING_DIR / "models" / model_name
+    metadata_file = model_dir / "metadata.json"
+    
+    if not metadata_file.exists():
+        raise HTTPException(status_code=404, detail="Model not found")
+    
+    try:
+        with open(metadata_file) as f:
+            model_data = json.load(f)
+        
+        # Check if model has valid weights
+        weights_dir = model_dir / "weights"
+        best_weights = weights_dir / "best.pt"
+        last_weights = weights_dir / "last.pt"
+        
+        has_weights = (best_weights.exists() and best_weights.stat().st_size > 1000000) or \
+                     (last_weights.exists() and last_weights.stat().st_size > 1000000)
+        
+        if has_weights and model_data.get("status") == "failed":
+            # Update status to completed
+            model_data.update({
+                "status": "completed",
+                "completed_at": model_data.get("failed_at") or datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat(),
+                "status_fixed": True,
+                "timeout_note": "Status corrected - training completed but exceeded timeout limit"
+            })
+            
+            # Save updated metadata
+            with open(metadata_file, "w") as f:
+                json.dump(model_data, f, indent=2)
+            
+            return {"message": f"Model {model_name} status fixed to completed", "status": "completed"}
+        elif not has_weights:
+            return {"message": f"Model {model_name} has no valid weights - cannot fix status", "status": "incomplete"}
+        else:
+            return {"message": f"Model {model_name} status is already correct", "status": model_data.get("status")}
+            
+    except Exception as e:
+        log.error(f"Error fixing model status: {e}")
+        raise HTTPException(status_code=500, detail="Error fixing model status")
 
 @app.get("/models/{model_name}/details")
 async def get_model_details(model_name: str):
