@@ -3429,24 +3429,38 @@ def draw_detections_on_frame(frame, detections):
 async def test_model_with_video(
     model_name: str,
     file: UploadFile = File(...),
-    frame_interval: int = 30,  # Analyze every Nth frame
-    max_frames: int = 10,      # Maximum frames to analyze
-    prompt: str = "Describe what you see on this TV screen",
-    selected_classes: str = "",  # Comma-separated class names to filter
-    generate_video: bool = False,  # Generate annotated MP4 output
-    skip_frequency: Optional[int] = None  # Alternative name for frame_interval for UI consistency
+    frame_interval: int = Form(30),  # Analyze every Nth frame
+    max_frames: int = Form(10),      # Maximum frames to analyze
+    prompt: str = Form("Describe what you see on this TV screen"),
+    selected_classes: str = Form(""),  # Comma-separated class names to filter
+    generate_video: str = Form("false"),  # Generate annotated MP4 output (string from FormData)
+    skip_frequency: Optional[int] = Form(None)  # Alternative name for frame_interval for UI consistency
 ):
     """Test a trained model on uploaded video file by analyzing frames"""
     import tempfile
     import cv2
     import os
     
+    # Convert string generate_video_bool to boolean
+    generate_video_bool_bool = generate_video_bool.lower() in ('true', '1', 'yes', 'on') if isinstance(generate_video_bool, str) else bool(generate_video_bool)
+    
     # Use skip_frequency if provided (for UI consistency)
     if skip_frequency is not None:
         frame_interval = skip_frequency
     
-    # Debug logging
-    log.info(f"Video analysis parameters: skip_frequency={skip_frequency}, frame_interval={frame_interval}, max_frames={max_frames}, selected_classes='{selected_classes}', generate_video={generate_video}")
+    # Debug logging - show all received parameters
+    log.info("=" * 50)
+    log.info("VIDEO ANALYSIS REQUEST RECEIVED")
+    log.info(f"Model: {model_name}")
+    log.info(f"File: {file.filename} ({file.content_type})")
+    log.info(f"Raw Parameters:")
+    log.info(f"  skip_frequency: {skip_frequency} (type: {type(skip_frequency)})")
+    log.info(f"  frame_interval: {frame_interval} (type: {type(frame_interval)})")
+    log.info(f"  max_frames: {max_frames} (type: {type(max_frames)})")
+    log.info(f"  selected_classes: '{selected_classes}' (type: {type(selected_classes)})")
+    log.info(f"  generate_video: {generate_video} (type: {type(generate_video)}) -> {generate_video_bool}")
+    log.info(f"  prompt: '{prompt}'")
+    log.info("=" * 50)
     
     # Parse selected classes
     class_filter = []
@@ -3509,7 +3523,7 @@ async def test_model_with_video(
         # Initialize video writer if generating annotated video
         video_writer = None
         output_video_path = None
-        if generate_video and model_type == "object_detection":
+        if generate_video_bool and model_type == "object_detection":
             output_video_path = test_dir / f"annotated_video_{test_id}.mp4"
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
             video_writer = cv2.VideoWriter(str(output_video_path), fourcc, fps, (video_width, video_height))
@@ -3546,7 +3560,7 @@ async def test_model_with_video(
                             raise Exception("No model weights found")
                         
                         yolo = YOLOInference(model_path)
-                        detections = yolo.predict_image(frame, return_visualization=generate_video)
+                        detections = yolo.predict_image(frame, return_visualization=generate_video_bool)
                         
                         # Filter detections by selected classes
                         filtered_detections = detections.get("detections", [])
@@ -3558,7 +3572,7 @@ async def test_model_with_video(
                         
                         # Create annotated frame if generating video
                         annotated_frame = frame.copy()
-                        if generate_video and filtered_detections:
+                        if generate_video_bool and filtered_detections:
                             annotated_frame = draw_detections_on_frame(frame, filtered_detections)
                         
                         # Write frame to video if generating video
@@ -3635,7 +3649,7 @@ async def test_model_with_video(
                 "width": video_width,
                 "height": video_height,
                 "selected_classes": class_filter,
-                "generate_video": generate_video,
+                "generate_video": generate_video_bool,
                 "output_video_path": str(output_video_path) if output_video_path else None
             },
             "summary": {

@@ -869,6 +869,9 @@ const ModelTesting = ({ onNotification }) => {
         );
         testData = response.data;
       } else if (inputType === 'video' && uploadedVideo) {
+        // Debug: Log current video analysis settings
+        console.log('Current videoAnalysisSettings:', videoAnalysisSettings);
+        
         // For video, use the video analysis endpoint with current settings
         const videoOptions = {
           skipFrequency: videoAnalysisSettings.frameSkipFrequency,
@@ -877,6 +880,8 @@ const ModelTesting = ({ onNotification }) => {
           generateVideo: videoAnalysisSettings.generateAnnotatedVideo,
           prompt: "Analyze TV/STB screen objects"
         };
+        
+        console.log('Video options being sent:', videoOptions);
         
         const response = await testingAPI.testModelWithVideo(
           selectedModel,
@@ -966,6 +971,9 @@ const ModelTesting = ({ onNotification }) => {
         );
         testData = response.data;
       } else if (inputType === 'video' && uploadedVideo) {
+        // Debug: Log current video analysis settings
+        console.log('Current videoAnalysisSettings:', videoAnalysisSettings);
+        
         // For video, use the video analysis endpoint with current settings
         const videoOptions = {
           skipFrequency: videoAnalysisSettings.frameSkipFrequency,
@@ -974,6 +982,8 @@ const ModelTesting = ({ onNotification }) => {
           generateVideo: videoAnalysisSettings.generateAnnotatedVideo,
           prompt: "Analyze TV/STB screen objects"
         };
+        
+        console.log('Video options being sent:', videoOptions);
         
         const response = await testingAPI.testModelWithVideo(
           selectedModel,
