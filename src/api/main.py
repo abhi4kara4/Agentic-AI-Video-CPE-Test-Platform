@@ -3445,11 +3445,16 @@ async def test_model_with_video(
     if skip_frequency is not None:
         frame_interval = skip_frequency
     
+    # Debug logging
+    log.info(f"Video analysis parameters: skip_frequency={skip_frequency}, frame_interval={frame_interval}, max_frames={max_frames}, selected_classes='{selected_classes}', generate_video={generate_video}")
+    
     # Parse selected classes
     class_filter = []
     if selected_classes:
         class_filter = [cls.strip().lower() for cls in selected_classes.split(",") if cls.strip()]
         log.info(f"Filtering for classes: {class_filter}")
+    else:
+        log.info("No class filtering applied - analyzing all classes")
     
     # Validate video file
     if not file.content_type.startswith('video/'):
@@ -3567,7 +3572,8 @@ async def test_model_with_video(
                             "total_detections": len(detections.get("detections", [])),
                             "filtered_detections": len(filtered_detections),
                             "processing_time": detections.get("processing_time", 0),
-                            "frame_path": str(frame_path)
+                            "frame_path": str(frame_path),
+                            "frame_url": f"/test/video/{test_id}/frame/{frame_path.name}"
                         })
                         
                     except Exception as e:
@@ -3576,7 +3582,8 @@ async def test_model_with_video(
                             "frame_number": frame_count,
                             "timestamp": frame_timestamp,
                             "error": str(e),
-                            "frame_path": str(frame_path)
+                            "frame_path": str(frame_path),
+                            "frame_url": f"/test/video/{test_id}/frame/{frame_path.name}"
                         })
                 else:
                     # Placeholder for other model types
@@ -3584,7 +3591,8 @@ async def test_model_with_video(
                         "frame_number": frame_count,
                         "timestamp": frame_timestamp,
                         "analysis": f"Frame {frame_count} analyzed with {model_name}",
-                        "frame_path": str(frame_path)
+                        "frame_path": str(frame_path),
+                        "frame_url": f"/test/video/{test_id}/frame/{frame_path.name}"
                     })
                 
                 analyzed_frames += 1
@@ -3596,6 +3604,14 @@ async def test_model_with_video(
         # Finalize video writer
         if video_writer is not None:
             video_writer.release()
+            log.info(f"Video writer released, output saved to: {output_video_path}")
+            
+            # Verify video was created successfully
+            if output_video_path and output_video_path.exists():
+                log.info(f"Annotated video generated successfully: {output_video_path.stat().st_size} bytes")
+            else:
+                log.error(f"Failed to generate annotated video at: {output_video_path}")
+                output_video_path = None
         
         # Clean up temp video file
         os.unlink(temp_video_path)
@@ -3665,6 +3681,25 @@ async def download_annotated_video(test_id: str):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to download video: {str(e)}")
+
+
+@app.get("/test/video/{test_id}/frame/{frame_name}")
+async def get_video_frame(test_id: str, frame_name: str):
+    """Get a specific frame image from video analysis"""
+    try:
+        test_dir = TESTING_DIR / f"video_test_{test_id}"
+        frame_file = test_dir / frame_name
+        
+        if not frame_file.exists():
+            raise HTTPException(status_code=404, detail="Frame image not found")
+        
+        return FileResponse(
+            path=str(frame_file),
+            media_type="image/jpeg"
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get frame: {str(e)}")
     
 @app.post("/test/models/{model_name}/analyze")
 async def test_single_model(model_name: str, prompt: str = "Describe what you see on this TV screen"):

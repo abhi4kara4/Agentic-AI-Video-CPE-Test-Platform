@@ -200,14 +200,27 @@ export const testingAPI = {
     
     const formData = new FormData();
     formData.append('file', videoFile);
-    formData.append('frame_interval', frameInterval);
+    
+    // Use skipFrequency if provided, otherwise use frameInterval
+    if (skipFrequency !== null && skipFrequency !== undefined) {
+      formData.append('skip_frequency', skipFrequency);
+      formData.append('frame_interval', skipFrequency); // Backup parameter
+    } else {
+      formData.append('frame_interval', frameInterval);
+    }
+    
     formData.append('max_frames', maxFrames);
     formData.append('prompt', prompt);
     formData.append('selected_classes', selectedClasses);
-    formData.append('generate_video', generateVideo);
-    if (skipFrequency !== null) {
-      formData.append('skip_frequency', skipFrequency);
-    }
+    formData.append('generate_video', generateVideo.toString());
+    
+    // Add debug logging
+    console.log('Video analysis options:', {
+      skipFrequency,
+      maxFrames,
+      selectedClasses,
+      generateVideo
+    });
     
     return apiClient.post(`/test/models/${modelName}/analyze-video`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' }

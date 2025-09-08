@@ -1845,18 +1845,22 @@ const ModelTesting = ({ onNotification }) => {
                                       </AccordionSummary>
                                       <AccordionDetails>
                                         <Grid container spacing={2}>
-                                          {result.results.frame_results.slice(0, 6).map((frame, frameIndex) => (
+                                          {result.results.frame_results.map((frame, frameIndex) => (
                                             <Grid item xs={12} sm={6} md={4} key={frameIndex}>
                                               <Card sx={{ p: 1 }}>
                                                 <Typography variant="caption" color="text.secondary">
                                                   Frame {frame.frame_number} ({frame.timestamp?.toFixed(1)}s)
                                                 </Typography>
-                                                {frame.frame_path && (
+                                                {frame.frame_url && (
                                                   <CardMedia
                                                     component="img"
                                                     sx={{ maxHeight: 120, objectFit: 'contain', mt: 1, mb: 1 }}
-                                                    image={`/api/${frame.frame_path}`}
+                                                    image={frame.frame_url}
                                                     alt={`Frame ${frame.frame_number}`}
+                                                    onError={(e) => {
+                                                      console.error('Frame image failed to load:', frame.frame_url);
+                                                      e.target.style.display = 'none';
+                                                    }}
                                                   />
                                                 )}
                                                 <Typography variant="caption">
@@ -1871,11 +1875,6 @@ const ModelTesting = ({ onNotification }) => {
                                             </Grid>
                                           ))}
                                         </Grid>
-                                        {result.results.frame_results.length > 6 && (
-                                          <Typography variant="caption" color="text.secondary" sx={{ mt: 2 }}>
-                                            Showing first 6 frames of {result.results.frame_results.length} analyzed frames
-                                          </Typography>
-                                        )}
                                       </AccordionDetails>
                                     </Accordion>
                                   )}
