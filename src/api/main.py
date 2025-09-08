@@ -3441,8 +3441,8 @@ async def test_model_with_video(
     import cv2
     import os
     
-    # Convert string generate_video_bool to boolean
-    generate_video_bool_bool = generate_video_bool.lower() in ('true', '1', 'yes', 'on') if isinstance(generate_video_bool, str) else bool(generate_video_bool)
+    # Convert string generate_video to boolean
+    generate_video_bool = generate_video.lower() in ('true', '1', 'yes', 'on') if isinstance(generate_video, str) else bool(generate_video)
     
     # Use skip_frequency if provided (for UI consistency)
     if skip_frequency is not None:
