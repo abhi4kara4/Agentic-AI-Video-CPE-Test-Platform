@@ -695,6 +695,18 @@ const ModelTesting = ({ onNotification }) => {
     maxTokens: 200,
   });
   
+  // Video analysis settings
+  const [videoAnalysisSettings, setVideoAnalysisSettings] = useState({
+    frameSkipFrequency: 30,
+    maxFramesToAnalyze: 10,
+    selectedClasses: [],
+    generateAnnotatedVideo: false,
+  });
+
+  // Model classes for filtering
+  const [availableClasses, setAvailableClasses] = useState([]);
+  const [videoMetadata, setVideoMetadata] = useState(null);
+  
   // File input refs
   const imageUploadRef = useRef(null);
   const videoUploadRef = useRef(null);
@@ -722,6 +734,16 @@ const ModelTesting = ({ onNotification }) => {
     }
   };
 
+  const loadAvailableClasses = async (modelName) => {
+    try {
+      const response = await trainingAPI.getModelClasses(modelName);
+      setAvailableClasses(response.data?.classes || []);
+    } catch (error) {
+      console.error('Failed to load model classes:', error);
+      setAvailableClasses([]);
+    }
+  };
+
   const handleModelSelect = (modelName) => {
     const model = models.find(m => m.name === modelName);
     setSelectedModel(modelName);
@@ -735,6 +757,17 @@ const ModelTesting = ({ onNotification }) => {
     } else if (model?.type === 'vision_llm') {
       setActiveTab(2);
     }
+
+    // Load available classes for object detection models
+    if (model?.type === 'object_detection') {
+      loadAvailableClasses(modelName);
+    }
+
+    // Reset video analysis settings when model changes
+    setVideoAnalysisSettings(prev => ({
+      ...prev,
+      selectedClasses: []
+    }));
   };
 
   const handleImageUpload = (event) => {
@@ -764,12 +797,38 @@ const ModelTesting = ({ onNotification }) => {
     if (file && file.type.startsWith('video/')) {
       const reader = new FileReader();
       reader.onload = (e) => {
-        setUploadedVideo({
-          file,
-          name: file.name,
-          url: e.target.result,
-          size: file.size
-        });
+        // Create video element to extract metadata
+        const videoElement = document.createElement('video');
+        videoElement.src = e.target.result;
+        
+        videoElement.onloadedmetadata = () => {
+          const metadata = {
+            duration: videoElement.duration,
+            width: videoElement.videoWidth,
+            height: videoElement.videoHeight,
+            fps: null, // FPS extraction requires more complex logic
+          };
+          
+          // Try to estimate FPS (this is an approximation)
+          // In a real scenario, you might need a library like ffprobe.js
+          if (metadata.duration > 0) {
+            // Estimate based on common frame rates
+            const estimatedFrameCount = Math.round(metadata.duration * 30); // Assume 30 FPS
+            metadata.estimatedFPS = 30;
+          }
+          
+          setVideoMetadata(metadata);
+          setUploadedVideo({
+            file,
+            name: file.name,
+            url: e.target.result,
+            size: file.size,
+            duration: metadata.duration,
+            width: metadata.width,
+            height: metadata.height,
+            estimatedFPS: metadata.estimatedFPS
+          });
+        };
       };
       reader.readAsDataURL(file);
     }
@@ -810,8 +869,20 @@ const ModelTesting = ({ onNotification }) => {
         );
         testData = response.data;
       } else if (inputType === 'video' && uploadedVideo) {
-        // For video, use stream endpoint (could be extended to process video frames)
-        const response = await testingAPI.testModel(selectedModel);
+        // For video, use the video analysis endpoint with current settings
+        const videoOptions = {
+          skipFrequency: videoAnalysisSettings.frameSkipFrequency,
+          maxFrames: videoAnalysisSettings.maxFramesToAnalyze,
+          selectedClasses: videoAnalysisSettings.selectedClasses.join(','),
+          generateVideo: videoAnalysisSettings.generateAnnotatedVideo,
+          prompt: "Analyze TV/STB screen objects"
+        };
+        
+        const response = await testingAPI.testModelWithVideo(
+          selectedModel,
+          uploadedVideo.file,
+          videoOptions
+        );
         testData = response.data;
       }
       
@@ -832,11 +903,22 @@ const ModelTesting = ({ onNotification }) => {
           settings: objectDetectionSettings
         }, ...prev]);
         
-        onNotification({
-          type: 'success',
-          title: 'Object Detection Complete',
-          message: `Found ${testData.detections?.length || 0} objects`
-        });
+        // Different notification based on input type
+        if (inputType === 'video') {
+          const totalDetections = testData.summary?.total_detections || 0;
+          const framesAnalyzed = testData.video_info?.analyzed_frames || 0;
+          onNotification({
+            type: 'success',
+            title: 'Video Analysis Complete',
+            message: `Analyzed ${framesAnalyzed} frames, found ${totalDetections} objects total`
+          });
+        } else {
+          onNotification({
+            type: 'success',
+            title: 'Object Detection Complete',
+            message: `Found ${testData.detections?.length || 0} objects`
+          });
+        }
       }
       
       await loadTestHistory();
@@ -884,7 +966,20 @@ const ModelTesting = ({ onNotification }) => {
         );
         testData = response.data;
       } else if (inputType === 'video' && uploadedVideo) {
-        const response = await testingAPI.testModel(selectedModel);
+        // For video, use the video analysis endpoint with current settings
+        const videoOptions = {
+          skipFrequency: videoAnalysisSettings.frameSkipFrequency,
+          maxFrames: videoAnalysisSettings.maxFramesToAnalyze,
+          selectedClasses: videoAnalysisSettings.selectedClasses.join(','),
+          generateVideo: videoAnalysisSettings.generateAnnotatedVideo,
+          prompt: "Analyze TV/STB screen objects"
+        };
+        
+        const response = await testingAPI.testModelWithVideo(
+          selectedModel,
+          uploadedVideo.file,
+          videoOptions
+        );
         testData = response.data;
       }
       
@@ -1145,13 +1240,126 @@ const ModelTesting = ({ onNotification }) => {
                 variant="outlined"
                 startIcon={<CameraIcon />}
                 onClick={() => videoUploadRef.current?.click()}
+                sx={{ mb: 2 }}
               >
                 Select Video
               </Button>
+              
               {uploadedVideo && (
-                <Typography variant="body2" sx={{ mt: 1 }}>
-                  Video: {uploadedVideo.name}
-                </Typography>
+                <Card sx={{ mt: 2, p: 2, bgcolor: 'background.paper' }}>
+                  <Typography variant="h6" gutterBottom>
+                    Video Information
+                  </Typography>
+                  <Grid container spacing={2}>
+                    <Grid item xs={12} sm={6}>
+                      <Typography variant="body2"><strong>File:</strong> {uploadedVideo.name}</Typography>
+                      <Typography variant="body2"><strong>Size:</strong> {(uploadedVideo.size / (1024 * 1024)).toFixed(2)} MB</Typography>
+                    </Grid>
+                    <Grid item xs={12} sm={6}>
+                      {uploadedVideo.duration && (
+                        <Typography variant="body2"><strong>Duration:</strong> {uploadedVideo.duration.toFixed(1)}s</Typography>
+                      )}
+                      {uploadedVideo.estimatedFPS && (
+                        <Typography variant="body2"><strong>Est. FPS:</strong> {uploadedVideo.estimatedFPS}</Typography>
+                      )}
+                      {uploadedVideo.width && uploadedVideo.height && (
+                        <Typography variant="body2"><strong>Resolution:</strong> {uploadedVideo.width}x{uploadedVideo.height}</Typography>
+                      )}
+                    </Grid>
+                  </Grid>
+                </Card>
+              )}
+
+              {/* Video Analysis Settings */}
+              {uploadedVideo && selectedModelType === 'object_detection' && (
+                <Card sx={{ mt: 2, p: 2 }}>
+                  <Typography variant="h6" gutterBottom>
+                    Video Analysis Settings
+                  </Typography>
+                  
+                  <Grid container spacing={2}>
+                    <Grid item xs={12} sm={6}>
+                      <TextField
+                        fullWidth
+                        label="Frame Skip Frequency"
+                        type="number"
+                        value={videoAnalysisSettings.frameSkipFrequency}
+                        onChange={(e) => setVideoAnalysisSettings(prev => ({
+                          ...prev,
+                          frameSkipFrequency: parseInt(e.target.value) || 1
+                        }))}
+                        inputProps={{ min: 1, max: 120 }}
+                        helperText="Analyze every Nth frame"
+                        size="small"
+                      />
+                    </Grid>
+                    
+                    <Grid item xs={12} sm={6}>
+                      <TextField
+                        fullWidth
+                        label="Max Frames to Analyze"
+                        type="number"
+                        value={videoAnalysisSettings.maxFramesToAnalyze}
+                        onChange={(e) => setVideoAnalysisSettings(prev => ({
+                          ...prev,
+                          maxFramesToAnalyze: parseInt(e.target.value) || 1
+                        }))}
+                        inputProps={{ min: 1, max: 100 }}
+                        helperText="Maximum frames to process"
+                        size="small"
+                      />
+                    </Grid>
+
+                    <Grid item xs={12}>
+                      <FormControl fullWidth size="small">
+                        <InputLabel>Select Classes to Detect (Optional)</InputLabel>
+                        <Select
+                          multiple
+                          value={videoAnalysisSettings.selectedClasses}
+                          onChange={(e) => setVideoAnalysisSettings(prev => ({
+                            ...prev,
+                            selectedClasses: e.target.value
+                          }))}
+                          renderValue={(selected) => (
+                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                              {selected.map((value) => (
+                                <Chip key={value} label={value} size="small" />
+                              ))}
+                            </Box>
+                          )}
+                        >
+                          {availableClasses.map((cls) => (
+                            <MenuItem key={cls.id} value={cls.name}>
+                              {cls.name}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                    </Grid>
+
+                    <Grid item xs={12}>
+                      <FormControlLabel
+                        control={
+                          <Switch
+                            checked={videoAnalysisSettings.generateAnnotatedVideo}
+                            onChange={(e) => setVideoAnalysisSettings(prev => ({
+                              ...prev,
+                              generateAnnotatedVideo: e.target.checked
+                            }))}
+                          />
+                        }
+                        label={
+                          <Box>
+                            <Typography variant="body2">Generate Annotated Video</Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              Create MP4 output with bounding box overlays (slower processing)
+                            </Typography>
+                          </Box>
+                        }
+                      />
+                    </Grid>
+                  </Grid>
+                </Card>
               )}
             </Box>
           )}
@@ -1540,6 +1748,138 @@ const ModelTesting = ({ onNotification }) => {
                                   detections={result.results.detections}
                                   settings={objectDetectionSettings}
                                 />
+                              )}
+
+                              {/* Video Analysis Results */}
+                              {result.results.video_info && (
+                                <Box>
+                                  <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
+                                    Video Analysis Results
+                                  </Typography>
+                                  
+                                  {/* Video Information Card */}
+                                  <Card sx={{ mb: 2, p: 2, bgcolor: 'background.default' }}>
+                                    <Typography variant="subtitle1" gutterBottom>Video Information</Typography>
+                                    <Grid container spacing={2}>
+                                      <Grid item xs={6} sm={3}>
+                                        <Typography variant="body2"><strong>File:</strong> {result.results.video_info.filename}</Typography>
+                                      </Grid>
+                                      <Grid item xs={6} sm={3}>
+                                        <Typography variant="body2"><strong>FPS:</strong> {result.results.video_info.fps?.toFixed(1) || 'N/A'}</Typography>
+                                      </Grid>
+                                      <Grid item xs={6} sm={3}>
+                                        <Typography variant="body2"><strong>Duration:</strong> {result.results.video_info.duration_seconds?.toFixed(1)}s</Typography>
+                                      </Grid>
+                                      <Grid item xs={6} sm={3}>
+                                        <Typography variant="body2"><strong>Resolution:</strong> {result.results.video_info.width}x{result.results.video_info.height}</Typography>
+                                      </Grid>
+                                    </Grid>
+                                  </Card>
+
+                                  {/* Analysis Summary */}
+                                  {result.results.summary && (
+                                    <Card sx={{ mb: 2, p: 2, bgcolor: 'background.default' }}>
+                                      <Typography variant="subtitle1" gutterBottom>Analysis Summary</Typography>
+                                      <Grid container spacing={2}>
+                                        <Grid item xs={6} sm={3}>
+                                          <Typography variant="body2"><strong>Frames Analyzed:</strong> {result.results.video_info.analyzed_frames}</Typography>
+                                        </Grid>
+                                        <Grid item xs={6} sm={3}>
+                                          <Typography variant="body2"><strong>Total Detections:</strong> {result.results.summary.total_detections}</Typography>
+                                        </Grid>
+                                        <Grid item xs={6} sm={3}>
+                                          <Typography variant="body2"><strong>Avg per Frame:</strong> {result.results.summary.avg_detections_per_frame?.toFixed(1)}</Typography>
+                                        </Grid>
+                                        <Grid item xs={6} sm={3}>
+                                          <Typography variant="body2"><strong>Processing Time:</strong> {result.results.summary.processing_time_seconds?.toFixed(1)}s</Typography>
+                                        </Grid>
+                                      </Grid>
+                                    </Card>
+                                  )}
+
+                                  {/* Download Annotated Video */}
+                                  {result.results.video_info.generate_video && result.results.video_info.output_video_path && (
+                                    <Box sx={{ mb: 2 }}>
+                                      <Button
+                                        variant="contained"
+                                        startIcon={<DownloadIcon />}
+                                        onClick={async () => {
+                                          try {
+                                            const response = await testingAPI.downloadAnnotatedVideo(result.results.test_id);
+                                            const blob = new Blob([response.data], { type: 'video/mp4' });
+                                            const url = window.URL.createObjectURL(blob);
+                                            const link = document.createElement('a');
+                                            link.href = url;
+                                            link.download = `annotated_video_${result.results.test_id}.mp4`;
+                                            document.body.appendChild(link);
+                                            link.click();
+                                            document.body.removeChild(link);
+                                            window.URL.revokeObjectURL(url);
+                                            onNotification({
+                                              type: 'success',
+                                              title: 'Download Started',
+                                              message: 'Annotated video download has begun'
+                                            });
+                                          } catch (error) {
+                                            console.error('Failed to download video:', error);
+                                            onNotification({
+                                              type: 'error',
+                                              title: 'Download Failed',
+                                              message: 'Failed to download annotated video'
+                                            });
+                                          }
+                                        }}
+                                      >
+                                        Download Annotated Video
+                                      </Button>
+                                    </Box>
+                                  )}
+
+                                  {/* Frame Analysis Results */}
+                                  {result.results.frame_results && result.results.frame_results.length > 0 && (
+                                    <Accordion>
+                                      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                                        <Typography variant="subtitle1">
+                                          Frame-by-Frame Analysis ({result.results.frame_results.length} frames)
+                                        </Typography>
+                                      </AccordionSummary>
+                                      <AccordionDetails>
+                                        <Grid container spacing={2}>
+                                          {result.results.frame_results.slice(0, 6).map((frame, frameIndex) => (
+                                            <Grid item xs={12} sm={6} md={4} key={frameIndex}>
+                                              <Card sx={{ p: 1 }}>
+                                                <Typography variant="caption" color="text.secondary">
+                                                  Frame {frame.frame_number} ({frame.timestamp?.toFixed(1)}s)
+                                                </Typography>
+                                                {frame.frame_path && (
+                                                  <CardMedia
+                                                    component="img"
+                                                    sx={{ maxHeight: 120, objectFit: 'contain', mt: 1, mb: 1 }}
+                                                    image={`/api/${frame.frame_path}`}
+                                                    alt={`Frame ${frame.frame_number}`}
+                                                  />
+                                                )}
+                                                <Typography variant="caption">
+                                                  Detections: {frame.detections?.length || 0}
+                                                </Typography>
+                                                {frame.error && (
+                                                  <Typography variant="caption" color="error.main">
+                                                    Error: {frame.error}
+                                                  </Typography>
+                                                )}
+                                              </Card>
+                                            </Grid>
+                                          ))}
+                                        </Grid>
+                                        {result.results.frame_results.length > 6 && (
+                                          <Typography variant="caption" color="text.secondary" sx={{ mt: 2 }}>
+                                            Showing first 6 frames of {result.results.frame_results.length} analyzed frames
+                                          </Typography>
+                                        )}
+                                      </AccordionDetails>
+                                    </Accordion>
+                                  )}
+                                </Box>
                               )}
                               
                               {result.modelType === 'image_classification' && result.results.predictions && (

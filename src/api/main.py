@@ -3307,6 +3307,365 @@ async def compare_models(models: List[str], prompt: str = "Describe what you see
     return comparison_data
 
 
+@app.get("/models/{model_name}/classes")
+async def get_model_classes(model_name: str):
+    """Get available classes for a trained model"""
+    try:
+        # Look for the model
+        models_dir = TRAINING_DIR / "models"
+        model_dir = models_dir / model_name
+        
+        if not model_dir.exists():
+            raise HTTPException(status_code=404, detail=f"Model {model_name} not found")
+        
+        # Try to get classes from YOLO model
+        try:
+            from src.models.yolo_inference import YOLOInference
+            
+            # Find model weights
+            weights_dir = model_dir / "weights"
+            best_weights = weights_dir / "best.pt"
+            last_weights = weights_dir / "last.pt"
+            
+            if best_weights.exists():
+                model_path = str(best_weights)
+            elif last_weights.exists():
+                model_path = str(last_weights)
+            else:
+                raise Exception("No model weights found")
+            
+            yolo = YOLOInference(model_path)
+            class_names = yolo.class_names or {}
+            
+            return {
+                "model_name": model_name,
+                "classes": [{"id": class_id, "name": class_name} 
+                          for class_id, class_name in class_names.items()],
+                "total_classes": len(class_names)
+            }
+            
+        except Exception as e:
+            log.error(f"Could not load model classes: {e}")
+            # Fallback to metadata if available
+            metadata_file = model_dir / "metadata.json"
+            if metadata_file.exists():
+                with open(metadata_file) as f:
+                    metadata = json.load(f)
+                    dataset_info = metadata.get("dataset_info", {})
+                    classes = dataset_info.get("classes", {})
+                    return {
+                        "model_name": model_name,
+                        "classes": [{"id": class_id, "name": class_name} 
+                                  for class_id, class_name in classes.items()],
+                        "total_classes": len(classes)
+                    }
+            
+            return {
+                "model_name": model_name,
+                "classes": [],
+                "total_classes": 0,
+                "error": "Could not determine available classes"
+            }
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get model classes: {str(e)}")
+
+
+def draw_detections_on_frame(frame, detections):
+    """Draw bounding boxes and labels on frame"""
+    import cv2
+    import numpy as np
+    
+    # Color palette for different classes
+    colors = [
+        (255, 0, 0),    # Red
+        (0, 255, 0),    # Green  
+        (0, 0, 255),    # Blue
+        (255, 255, 0),  # Yellow
+        (255, 0, 255),  # Magenta
+        (0, 255, 255),  # Cyan
+        (128, 0, 128),  # Purple
+        (255, 165, 0),  # Orange
+        (0, 128, 0),    # Dark Green
+        (128, 128, 0)   # Olive
+    ]
+    
+    annotated_frame = frame.copy()
+    
+    for i, detection in enumerate(detections):
+        # Get bounding box coordinates
+        bbox = detection.get("bbox", [])
+        if len(bbox) < 4:
+            continue
+            
+        x, y, w, h = bbox
+        x1, y1, x2, y2 = x, y, x + w, y + h
+        
+        # Get class info
+        class_name = detection.get("class", "unknown")
+        confidence = detection.get("confidence", 0.0)
+        
+        # Choose color based on class (consistent coloring)
+        color_idx = hash(class_name) % len(colors)
+        color = colors[color_idx]
+        
+        # Draw bounding box
+        cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)
+        
+        # Draw label background
+        label = f"{class_name}: {confidence:.2f}"
+        label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
+        cv2.rectangle(annotated_frame, (x1, y1 - label_size[1] - 10), 
+                     (x1 + label_size[0], y1), color, -1)
+        
+        # Draw label text
+        cv2.putText(annotated_frame, label, (x1, y1 - 5), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+    
+    return annotated_frame
+
+
+@app.post("/test/models/{model_name}/analyze-video")
+async def test_model_with_video(
+    model_name: str,
+    file: UploadFile = File(...),
+    frame_interval: int = 30,  # Analyze every Nth frame
+    max_frames: int = 10,      # Maximum frames to analyze
+    prompt: str = "Describe what you see on this TV screen",
+    selected_classes: str = "",  # Comma-separated class names to filter
+    generate_video: bool = False,  # Generate annotated MP4 output
+    skip_frequency: Optional[int] = None  # Alternative name for frame_interval for UI consistency
+):
+    """Test a trained model on uploaded video file by analyzing frames"""
+    import tempfile
+    import cv2
+    import os
+    
+    # Use skip_frequency if provided (for UI consistency)
+    if skip_frequency is not None:
+        frame_interval = skip_frequency
+    
+    # Parse selected classes
+    class_filter = []
+    if selected_classes:
+        class_filter = [cls.strip().lower() for cls in selected_classes.split(",") if cls.strip()]
+        log.info(f"Filtering for classes: {class_filter}")
+    
+    # Validate video file
+    if not file.content_type.startswith('video/'):
+        raise HTTPException(status_code=400, detail="File must be a video")
+    
+    # Look for the model
+    models_dir = TRAINING_DIR / "models"
+    model_dir = models_dir / model_name
+    model_metadata = None
+    model_type = "vision_llm"
+    
+    if model_dir.exists():
+        metadata_file = model_dir / "metadata.json"
+        if metadata_file.exists():
+            with open(metadata_file) as f:
+                model_metadata = json.load(f)
+                model_type = model_metadata.get("dataset_type", "vision_llm")
+    else:
+        if model_name not in AVAILABLE_MODELS:
+            raise HTTPException(status_code=404, detail=f"Model {model_name} not found")
+    
+    # Create temp directory for video processing
+    test_id = str(uuid.uuid4())
+    test_dir = TESTING_DIR / f"video_test_{test_id}"
+    test_dir.mkdir(parents=True, exist_ok=True)
+    
+    try:
+        # Save uploaded video to temp file
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_video:
+            content = await file.read()
+            temp_video.write(content)
+            temp_video_path = temp_video.name
+        
+        # Open video with OpenCV
+        cap = cv2.VideoCapture(temp_video_path)
+        if not cap.isOpened():
+            raise HTTPException(status_code=400, detail="Could not open video file")
+        
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        duration = total_frames / fps if fps > 0 else 0
+        video_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        video_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        
+        log.info(f"Processing video: {total_frames} frames, {fps} FPS, {duration:.2f}s duration, {video_width}x{video_height}")
+        
+        frame_results = []
+        annotated_frames = []  # For video generation
+        frame_count = 0
+        analyzed_frames = 0
+        
+        # Initialize video writer if generating annotated video
+        video_writer = None
+        output_video_path = None
+        if generate_video and model_type == "object_detection":
+            output_video_path = test_dir / f"annotated_video_{test_id}.mp4"
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            video_writer = cv2.VideoWriter(str(output_video_path), fourcc, fps, (video_width, video_height))
+        
+        start_time = datetime.now()
+        
+        while True:
+            ret, frame = cap.read()
+            if not ret or analyzed_frames >= max_frames:
+                break
+            
+            # Analyze every Nth frame
+            if frame_count % frame_interval == 0:
+                frame_timestamp = frame_count / fps if fps > 0 else frame_count
+                frame_path = test_dir / f"frame_{frame_count:06d}.jpg"
+                cv2.imwrite(str(frame_path), frame)
+                
+                # Analyze frame based on model type
+                if model_type == "object_detection":
+                    try:
+                        # Import YOLO inference
+                        from src.models.yolo_inference import YOLOInference
+                        
+                        # Find model weights
+                        weights_dir = model_dir / "weights"
+                        best_weights = weights_dir / "best.pt"
+                        last_weights = weights_dir / "last.pt"
+                        
+                        if best_weights.exists():
+                            model_path = str(best_weights)
+                        elif last_weights.exists():
+                            model_path = str(last_weights)
+                        else:
+                            raise Exception("No model weights found")
+                        
+                        yolo = YOLOInference(model_path)
+                        detections = yolo.predict_image(frame, return_visualization=generate_video)
+                        
+                        # Filter detections by selected classes
+                        filtered_detections = detections.get("detections", [])
+                        if class_filter:
+                            filtered_detections = [
+                                det for det in filtered_detections 
+                                if det.get("class", "").lower() in class_filter
+                            ]
+                        
+                        # Create annotated frame if generating video
+                        annotated_frame = frame.copy()
+                        if generate_video and filtered_detections:
+                            annotated_frame = draw_detections_on_frame(frame, filtered_detections)
+                        
+                        # Write frame to video if generating video
+                        if video_writer is not None:
+                            video_writer.write(annotated_frame)
+                        
+                        frame_results.append({
+                            "frame_number": frame_count,
+                            "timestamp": frame_timestamp,
+                            "detections": filtered_detections,
+                            "total_detections": len(detections.get("detections", [])),
+                            "filtered_detections": len(filtered_detections),
+                            "processing_time": detections.get("processing_time", 0),
+                            "frame_path": str(frame_path)
+                        })
+                        
+                    except Exception as e:
+                        log.error(f"YOLO inference failed for frame {frame_count}: {e}")
+                        frame_results.append({
+                            "frame_number": frame_count,
+                            "timestamp": frame_timestamp,
+                            "error": str(e),
+                            "frame_path": str(frame_path)
+                        })
+                else:
+                    # Placeholder for other model types
+                    frame_results.append({
+                        "frame_number": frame_count,
+                        "timestamp": frame_timestamp,
+                        "analysis": f"Frame {frame_count} analyzed with {model_name}",
+                        "frame_path": str(frame_path)
+                    })
+                
+                analyzed_frames += 1
+            
+            frame_count += 1
+        
+        cap.release()
+        
+        # Finalize video writer
+        if video_writer is not None:
+            video_writer.release()
+        
+        # Clean up temp video file
+        os.unlink(temp_video_path)
+        
+        processing_time = (datetime.now() - start_time).total_seconds()
+        
+        # Create summary
+        total_detections = sum(len(result.get("detections", [])) for result in frame_results)
+        filtered_detections_count = sum(len(result.get("detections", [])) for result in frame_results)
+        
+        result_data = {
+            "model_name": model_name,
+            "model_type": model_type,
+            "video_info": {
+                "filename": file.filename,
+                "total_frames": total_frames,
+                "fps": fps,
+                "duration_seconds": duration,
+                "analyzed_frames": analyzed_frames,
+                "frame_interval": frame_interval,
+                "width": video_width,
+                "height": video_height,
+                "selected_classes": class_filter,
+                "generate_video": generate_video,
+                "output_video_path": str(output_video_path) if output_video_path else None
+            },
+            "summary": {
+                "total_detections": total_detections,
+                "filtered_detections": filtered_detections_count,
+                "avg_detections_per_frame": total_detections / max(analyzed_frames, 1),
+                "avg_filtered_detections_per_frame": filtered_detections_count / max(analyzed_frames, 1),
+                "processing_time_seconds": processing_time
+            },
+            "frame_results": frame_results,
+            "test_id": test_id,
+            "created_at": start_time.isoformat()
+        }
+        
+        # Save test results
+        with open(test_dir / "video_analysis.json", "w") as f:
+            json.dump(result_data, f, indent=2)
+        
+        log.info(f"Video analysis completed: {analyzed_frames} frames analyzed, {total_detections} total detections")
+        
+        return result_data
+        
+    except Exception as e:
+        log.error(f"Video analysis failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Video analysis failed: {str(e)}")
+
+
+@app.get("/test/video/{test_id}/download")
+async def download_annotated_video(test_id: str):
+    """Download generated annotated video"""
+    try:
+        test_dir = TESTING_DIR / f"video_test_{test_id}"
+        video_file = test_dir / f"annotated_video_{test_id}.mp4"
+        
+        if not video_file.exists():
+            raise HTTPException(status_code=404, detail="Annotated video not found")
+        
+        return FileResponse(
+            path=str(video_file),
+            media_type="video/mp4",
+            filename=f"annotated_video_{test_id}.mp4"
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to download video: {str(e)}")
+    
 @app.post("/test/models/{model_name}/analyze")
 async def test_single_model(model_name: str, prompt: str = "Describe what you see on this TV screen"):
     """Test a trained model on current frame"""

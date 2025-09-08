@@ -163,6 +163,8 @@ export const trainingAPI = {
     apiClient.get(`/models/${modelName}/download?file_type=${fileType}`, { responseType: 'blob' }),
   getModelDetails: (modelName) => 
     apiClient.get(`/models/${modelName}/details`),
+  getModelClasses: (modelName) =>
+    apiClient.get(`/models/${modelName}/classes`),
   exportModel: (modelName, format = 'pytorch') => 
     apiClient.get(`/models/${modelName}/export/${format}`, { responseType: 'blob' }),
   
@@ -186,6 +188,33 @@ export const testingAPI = {
       headers: { 'Content-Type': 'multipart/form-data' }
     });
   },
+  testModelWithVideo: (modelName, videoFile, options = {}) => {
+    const {
+      frameInterval = 30,
+      maxFrames = 10,
+      prompt = "Describe what you see on this TV screen",
+      selectedClasses = "",
+      generateVideo = false,
+      skipFrequency = null
+    } = options;
+    
+    const formData = new FormData();
+    formData.append('file', videoFile);
+    formData.append('frame_interval', frameInterval);
+    formData.append('max_frames', maxFrames);
+    formData.append('prompt', prompt);
+    formData.append('selected_classes', selectedClasses);
+    formData.append('generate_video', generateVideo);
+    if (skipFrequency !== null) {
+      formData.append('skip_frequency', skipFrequency);
+    }
+    
+    return apiClient.post(`/test/models/${modelName}/analyze-video`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+  },
+  downloadAnnotatedVideo: (testId) =>
+    apiClient.get(`/test/video/${testId}/download`, { responseType: 'blob' }),
   benchmarkModel: (modelName, iterations = 5, prompt = "Describe what you see on this TV screen") => 
     apiClient.post(`/test/benchmark/${modelName}`, { 
       iterations,
