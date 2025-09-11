@@ -67,6 +67,13 @@ const PaddleOCRLabeler = ({
     if (labels?.textBoxes) {
       console.log('Text boxes:', labels.textBoxes);
       setTextBoxes(labels.textBoxes);
+      
+      // Force redraw after setting text boxes
+      setTimeout(() => {
+        if (imageLoaded) {
+          drawCanvas();
+        }
+      }, 100);
     } else {
       setTextBoxes([]);
     }
@@ -83,7 +90,7 @@ const PaddleOCRLabeler = ({
     if (imageLoaded) {
       drawCanvas();
     }
-  }, [textBoxes, zoom, imageLoaded, panOffset]);
+  }, [textBoxes, zoom, imageLoaded, panOffset, imageParams]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -213,6 +220,11 @@ const PaddleOCRLabeler = ({
     const { x, y, width, height, text, type } = box;
     const textType = availableTextTypes[type] || availableTextTypes[Object.keys(availableTextTypes)[0]];
     const color = textType.color;
+    
+    // Check if imageParams is valid
+    if (!imageParams.drawWidth || !imageParams.drawHeight) {
+      return; // Skip drawing if image params not ready
+    }
     
     // Convert normalized coordinates to canvas coordinates
     const canvasX = imageParams.offsetX + (x / 100) * imageParams.drawWidth;

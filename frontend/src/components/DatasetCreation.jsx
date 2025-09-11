@@ -1192,18 +1192,38 @@ const DatasetCreation = ({ onNotification }) => {
   };
 
   // Copy/Paste and Multi-selection functions
-  const handleCopyAnnotations = (annotations) => {
-    setCopiedAnnotations(annotations);
+  const handleCopyAnnotations = (annotations, imageName = null) => {
+    // Handle different annotation formats
+    let formattedAnnotations = annotations;
+    let countMessage = '';
     
-    console.log('DatasetCreation - Copy annotations:', annotations);
-    console.log('DatasetCreation - Image name from annotations:', annotations.imageInfo?.imageName);
+    if (Array.isArray(annotations)) {
+      // PaddleOCR format - annotations is directly the textBoxes array
+      formattedAnnotations = {
+        textBoxes: annotations,
+        imageInfo: { imageName: imageName || 'unknown image' },
+        datasetType: config.datasetType
+      };
+      countMessage = `${annotations.length} text boxes`;
+    } else if (annotations.boundingBoxes) {
+      // Object detection format - already structured
+      countMessage = `${annotations.boundingBoxes.length} bounding boxes`;
+    } else if (annotations.textBoxes) {
+      // PaddleOCR format - already structured
+      countMessage = `${annotations.textBoxes.length} text boxes`;
+    }
     
-    const imageName = annotations.imageInfo?.imageName || 'unknown image';
+    setCopiedAnnotations(formattedAnnotations);
+    
+    console.log('DatasetCreation - Copy annotations:', formattedAnnotations);
+    console.log('DatasetCreation - Image name:', imageName);
+    
+    const displayImageName = imageName || formattedAnnotations.imageInfo?.imageName || 'unknown image';
     
     onNotification({
       type: 'success',
       title: 'Annotations Copied',
-      message: `Copied ${annotations.boundingBoxes?.length || 0} bounding boxes from ${imageName}`
+      message: `Copied ${countMessage} from ${displayImageName}`
     });
   };
 
@@ -1244,15 +1264,26 @@ const DatasetCreation = ({ onNotification }) => {
           // Create label data with pasted annotations (match single save format)
           const labelData = {
             datasetType: config.datasetType,
-            labels: {
-              boundingBoxes: copiedAnnotations.boundingBoxes.map(box => ({
-                ...box,
-                id: Date.now() + Math.random() // New unique ID
-              })),
-              notes: `Bulk pasted from ${copiedAnnotations.imageInfo?.imageName || 'source image'}`
-            },
+            labels: {},
             augmentationOptions: config.augmentationOptions
           };
+          
+          // Handle different annotation types
+          if (copiedAnnotations.boundingBoxes) {
+            // Object detection format
+            labelData.labels.boundingBoxes = copiedAnnotations.boundingBoxes.map(box => ({
+              ...box,
+              id: Date.now() + Math.random() // New unique ID
+            }));
+            labelData.labels.notes = `Bulk pasted from ${copiedAnnotations.imageInfo?.imageName || 'source image'}`;
+          } else if (copiedAnnotations.textBoxes) {
+            // PaddleOCR format
+            labelData.labels.textBoxes = copiedAnnotations.textBoxes.map(box => ({
+              ...box,
+              id: Date.now() + Math.random() // New unique ID
+            }));
+            labelData.labels.notes = `Bulk pasted from ${copiedAnnotations.imageInfo?.imageName || 'source image'}`;
+          }
           
           console.log(`Bulk paste - sending to backend for ${image.filename}:`, labelData);
 
@@ -1275,16 +1306,28 @@ const DatasetCreation = ({ onNotification }) => {
       // Update local state for successful updates
       const updatedImages = capturedImages.map(img => {
         if (selectedImages.has(img.id)) {
+          const updatedLabels = { ...currentLabels };
+          
+          // Handle different annotation types
+          if (copiedAnnotations.boundingBoxes) {
+            // Object detection format
+            updatedLabels.boundingBoxes = copiedAnnotations.boundingBoxes.map(box => ({
+              ...box,
+              id: Date.now() + Math.random()
+            }));
+          } else if (copiedAnnotations.textBoxes) {
+            // PaddleOCR format
+            updatedLabels.textBoxes = copiedAnnotations.textBoxes.map(box => ({
+              ...box,
+              id: Date.now() + Math.random()
+            }));
+          }
+          
+          updatedLabels.notes = `Bulk pasted from ${copiedAnnotations.imageInfo?.imageName || 'source image'}`;
+          
           return {
             ...img,
-            labels: {
-              ...currentLabels,
-              boundingBoxes: copiedAnnotations.boundingBoxes.map(box => ({
-                ...box,
-                id: Date.now() + Math.random()
-              })),
-              notes: `Bulk pasted from ${copiedAnnotations.imageInfo?.imageName || 'source image'}`
-            },
+            labels: updatedLabels,
             datasetType: config.datasetType
           };
         }
@@ -1875,7 +1918,15 @@ const DatasetCreation = ({ onNotification }) => {
                       
                       {copiedAnnotations && (
                         <Chip 
-                          label={`${copiedAnnotations.boundingBoxes?.length || 0} boxes copied`}
+                          label={`${
+                            copiedAnnotations.boundingBoxes?.length || 
+                            copiedAnnotations.textBoxes?.length || 
+                            0
+                          } ${
+                            copiedAnnotations.boundingBoxes ? 'boxes' : 
+                            copiedAnnotations.textBoxes ? 'text annotations' : 
+                            'items'
+                          } copied`}
                           size="small"
                           color="success"
                           variant="outlined"
@@ -2099,9 +2150,17 @@ const DatasetCreation = ({ onNotification }) => {
               Label Image
             </Box>
             
-            {config.datasetType === DATASET_TYPES.OBJECT_DETECTION && copiedAnnotations && (
+            {copiedAnnotations && (
               <Chip 
-                label={`${copiedAnnotations.boundingBoxes?.length || 0} boxes copied`}
+                label={`${
+                  copiedAnnotations.boundingBoxes?.length || 
+                  copiedAnnotations.textBoxes?.length || 
+                  0
+                } ${
+                  copiedAnnotations.boundingBoxes ? 'boxes' : 
+                  copiedAnnotations.textBoxes ? 'text annotations' : 
+                  'items'
+                } copied`}
                 size="small"
                 color="success"
                 variant="outlined"
@@ -2338,8 +2397,13 @@ const DatasetCreation = ({ onNotification }) => {
         <DialogTitle>Bulk Paste Annotations</DialogTitle>
         <DialogContent>
           <Alert severity="info" sx={{ mb: 2 }}>
-            You are about to paste <strong>{copiedAnnotations?.boundingBoxes?.length || 0} bounding boxes</strong> 
-            to <strong>{selectedImages.size} selected images</strong>.
+            You are about to paste <strong>
+              {copiedAnnotations?.boundingBoxes?.length || copiedAnnotations?.textBoxes?.length || 0} {
+                copiedAnnotations?.boundingBoxes ? 'bounding boxes' : 
+                copiedAnnotations?.textBoxes ? 'text annotations' : 
+                'items'
+              }
+            </strong> to <strong>{selectedImages.size} selected images</strong>.
           </Alert>
           
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
@@ -2354,7 +2418,11 @@ const DatasetCreation = ({ onNotification }) => {
               <Typography variant="subtitle2">Source Image:</Typography>
               <Typography variant="body2">{copiedAnnotations.imageInfo.imageName}</Typography>
               <Typography variant="caption" color="text.secondary">
-                {copiedAnnotations.boundingBoxes?.length || 0} bounding boxes
+                {copiedAnnotations.boundingBoxes?.length || copiedAnnotations.textBoxes?.length || 0} {
+                  copiedAnnotations.boundingBoxes ? 'bounding boxes' : 
+                  copiedAnnotations.textBoxes ? 'text annotations' : 
+                  'items'
+                }
               </Typography>
             </Box>
           )}

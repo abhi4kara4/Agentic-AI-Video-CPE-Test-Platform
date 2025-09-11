@@ -809,6 +809,23 @@ async def capture_to_dataset(dataset_name: str):
     
     cv2.imwrite(str(image_path), frame)
     
+    # Update dataset metadata image count
+    try:
+        metadata_file = dataset_dir / "metadata.json"
+        if metadata_file.exists():
+            with open(metadata_file, "r") as f:
+                metadata = json.load(f)
+            
+            # Update image count
+            image_dir = dataset_dir / "images"
+            if image_dir.exists():
+                metadata["image_count"] = len(list(image_dir.glob("*.jpg")))
+            
+            with open(metadata_file, "w") as f:
+                json.dump(metadata, f, indent=2)
+    except Exception as metadata_error:
+        log.warning(f"Failed to update dataset metadata: {metadata_error}")
+    
     result = {
         "status": "success",
         "image_filename": image_filename,
@@ -862,6 +879,14 @@ async def label_image(dataset_name: str, request: LabelImageRequest):
                     "confidence": labels.get('confidence', 100),
                     "augmentation_options": request.label_data.get('augmentationOptions', {})
                 })
+            elif dataset_type == 'paddleocr':
+                # PaddleOCR format - save text boxes for OCR training
+                annotation.update({
+                    "dataset_type": "paddleocr",
+                    "textBoxes": labels.get('textBoxes', []),
+                    "augmentation_options": request.label_data.get('augmentationOptions', {}),
+                    "notes": request.notes or ""
+                })
             elif dataset_type == 'vision_llm':
                 # Vision LLM format
                 if request.screen_type not in SCREEN_STATES:
@@ -895,6 +920,23 @@ async def label_image(dataset_name: str, request: LabelImageRequest):
         
         with open(annotation_file, "w") as f:
             json.dump(annotation, f, indent=2)
+        
+        # Update dataset metadata image count
+        try:
+            metadata_file = dataset_dir / "metadata.json"
+            if metadata_file.exists():
+                with open(metadata_file, "r") as f:
+                    metadata = json.load(f)
+                
+                # Update image count
+                image_dir = dataset_dir / "images"
+                if image_dir.exists():
+                    metadata["image_count"] = len(list(image_dir.glob("*.jpg")))
+                
+                with open(metadata_file, "w") as f:
+                    json.dump(metadata, f, indent=2)
+        except Exception as metadata_error:
+            log.warning(f"Failed to update dataset metadata: {metadata_error}")
         
         # Broadcast image labeling
         try:
