@@ -1154,6 +1154,8 @@ const DatasetCreation = ({ onNotification }) => {
         format = 'folder_structure';
       } else if (config.datasetType === DATASET_TYPES.VISION_LLM) {
         format = 'llava';
+      } else if (config.datasetType === DATASET_TYPES.PADDLEOCR) {
+        format = 'paddleocr';
       }
 
       onNotification({

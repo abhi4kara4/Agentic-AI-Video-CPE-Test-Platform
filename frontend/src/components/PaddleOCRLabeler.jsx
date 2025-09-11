@@ -524,22 +524,26 @@ const PaddleOCRLabeler = ({
             <Grid item xs={12} sm={6} md={3}>
               <Box sx={{ display: 'flex', gap: 1 }}>
                 <Tooltip title="Copy Annotations">
-                  <IconButton 
-                    size="small" 
-                    onClick={handleCopyAnnotations}
-                    disabled={textBoxes.length === 0}
-                  >
-                    <CopyIcon />
-                  </IconButton>
+                  <span>
+                    <IconButton 
+                      size="small" 
+                      onClick={handleCopyAnnotations}
+                      disabled={textBoxes.length === 0}
+                    >
+                      <CopyIcon />
+                    </IconButton>
+                  </span>
                 </Tooltip>
                 <Tooltip title="Paste Annotations">
-                  <IconButton 
-                    size="small" 
-                    onClick={handlePasteAnnotations}
-                    disabled={!copiedAnnotations || copiedAnnotations.length === 0}
-                  >
-                    <PasteIcon />
-                  </IconButton>
+                  <span>
+                    <IconButton 
+                      size="small" 
+                      onClick={handlePasteAnnotations}
+                      disabled={!copiedAnnotations || copiedAnnotations.length === 0}
+                    >
+                      <PasteIcon />
+                    </IconButton>
+                  </span>
                 </Tooltip>
               </Box>
             </Grid>
