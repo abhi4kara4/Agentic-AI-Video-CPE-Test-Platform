@@ -5,7 +5,7 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 // Create axios instance with default config
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 60000, // 60 seconds for model operations
+  timeout: 300000, // 5 minutes for video analysis operations
   headers: {
     'Content-Type': 'application/json',
   },
@@ -223,7 +223,8 @@ export const testingAPI = {
     });
     
     return apiClient.post(`/test/models/${modelName}/analyze-video`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 600000 // 10 minutes for video analysis
     });
   },
   downloadAnnotatedVideo: (testId) =>
@@ -251,6 +252,69 @@ export const testingAPI = {
     apiClient.post(`/test/live/${sessionId}/stop`),
   getLiveTestResults: (sessionId) => 
     apiClient.get(`/test/live/${sessionId}/results`),
+    
+  // PaddleOCR Testing API
+  testPaddleOCRModel: (modelName, imageData = null, settings = {}) => {
+    const requestData = {
+      language: settings.language || 'en',
+      task_type: settings.taskType || 'both',
+      confidence_threshold: settings.confidenceThreshold || 0.5
+    };
+    if (imageData) {
+      requestData.image_data = imageData;
+    }
+    return apiClient.post(`/test/paddleocr/${modelName}/analyze`, requestData);
+  },
+  
+  testPaddleOCRModelWithUpload: (modelName, imageFile, settings = {}) => {
+    const formData = new FormData();
+    formData.append('file', imageFile);
+    formData.append('language', settings.language || 'en');
+    formData.append('task_type', settings.taskType || 'both');
+    formData.append('confidence_threshold', settings.confidenceThreshold || 0.5);
+    return apiClient.post(`/test/paddleocr/${modelName}/analyze-upload`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+  },
+  
+  testPaddleOCRModelWithVideo: (modelName, videoFile, options = {}) => {
+    const formData = new FormData();
+    formData.append('file', videoFile);
+    formData.append('language', options.language || 'en');
+    formData.append('task_type', options.task_type || 'both');
+    formData.append('confidence_threshold', options.confidence_threshold || 0.5);
+    formData.append('skip_frequency', options.skipFrequency || 30);
+    formData.append('max_frames', options.maxFrames || 10);
+    formData.append('generate_video', options.generateVideo?.toString() || 'false');
+    
+    return apiClient.post(`/test/paddleocr/${modelName}/analyze-video`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 600000 // 10 minutes for video analysis
+    });
+  },
+  
+  // Async Video Analysis API (with timeout fallback)
+  testModelWithVideoAsync: (modelName, videoFile, options = {}) => {
+    const formData = new FormData();
+    formData.append('file', videoFile);
+    formData.append('frame_interval', options.frameInterval || 30);
+    formData.append('max_frames', options.maxFrames || 10);
+    formData.append('prompt', options.prompt || "Describe what you see on this TV screen");
+    formData.append('selected_classes', options.selectedClasses || "");
+    formData.append('generate_video', options.generateVideo?.toString() || 'false');
+    formData.append('skip_frequency', options.skipFrequency || 30);
+    
+    return apiClient.post(`/test/models/${modelName}/analyze-video-async`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 30000 // Short timeout for starting the job
+    });
+  },
+  
+  getVideoAnalysisStatus: (analysisId) => 
+    apiClient.get(`/test/video-analysis/${analysisId}/status`),
+    
+  getVideoAnalysisResults: (analysisId) => 
+    apiClient.get(`/test/video-analysis/${analysisId}/results`),
 };
 
 // WebSocket for real-time updates

@@ -62,6 +62,7 @@ import { useDatasetCreation } from '../context/DatasetCreationContext.jsx';
 import DatasetTypeSelector from './DatasetTypeSelector.jsx';
 import ObjectDetectionLabeler from './ObjectDetectionLabeler.jsx';
 import ImageClassificationLabeler from './ImageClassificationLabeler.jsx';
+import PaddleOCRLabeler from './PaddleOCRLabeler.jsx';
 import { DATASET_TYPE_INFO, DATASET_TYPES } from '../constants/datasetTypes.js';
 
 // Screen state definitions
@@ -2172,6 +2173,19 @@ const DatasetCreation = ({ onNotification }) => {
                   labels={currentLabels}
                   onLabelsChange={setCurrentLabels}
                   customClasses={config.customClasses?.image_classification}
+                />
+              )}
+              
+              {config.datasetType === DATASET_TYPES.PADDLEOCR && selectedImage && (
+                <PaddleOCRLabeler
+                  image={getImageUrls(selectedImage).fullImageUrl}
+                  labels={currentLabels}
+                  onLabelsChange={setCurrentLabels}
+                  copiedAnnotations={copiedAnnotations}
+                  onCopyAnnotations={handleCopyAnnotations}
+                  showCopyPaste={true}
+                  imageName={selectedImage?.filename || selectedImage?.path?.split('/').pop() || 'unknown'}
+                  customTextTypes={config.customClasses?.paddleocr}
                 />
               )}
               

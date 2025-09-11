@@ -289,6 +289,9 @@ const ModelTraining = ({ onNotification }) => {
     imageSize: 640,
     patience: 10,
     device: 'auto',
+    // PaddleOCR specific parameters
+    language: 'en',
+    trainType: 'det', // 'det', 'rec', 'cls'
   });
   const [startTrainingDialog, setStartTrainingDialog] = useState(false);
   const [isStartingTraining, setIsStartingTraining] = useState(false);
@@ -298,6 +301,17 @@ const ModelTraining = ({ onNotification }) => {
   const [detailsActiveTab, setDetailsActiveTab] = useState(0);
   const [downloadMenuAnchor, setDownloadMenuAnchor] = useState(null);
   const [selectedModelForDownload, setSelectedModelForDownload] = useState(null);
+
+  // Update base model when PaddleOCR parameters change
+  useEffect(() => {
+    const selectedDatasetType = datasets.find(d => d.id === selectedDataset)?.dataset_type;
+    if (selectedDatasetType === DATASET_TYPES.PADDLEOCR) {
+      const availableModels = getPaddleOCRModels(trainingConfig.language, trainingConfig.trainType);
+      if (availableModels.length > 0) {
+        setTrainingConfig(prev => ({ ...prev, baseModel: availableModels[0].value }));
+      }
+    }
+  }, [trainingConfig.language, trainingConfig.trainType, selectedDataset, datasets]);
 
   // Load data on component mount
   useEffect(() => {
@@ -629,6 +643,7 @@ const ModelTraining = ({ onNotification }) => {
       case DATASET_TYPES.OBJECT_DETECTION: return 'primary';
       case DATASET_TYPES.IMAGE_CLASSIFICATION: return 'secondary';
       case DATASET_TYPES.VISION_LLM: return 'success';
+      case DATASET_TYPES.PADDLEOCR: return 'warning';
       default: return 'default';
     }
   };
@@ -641,6 +656,33 @@ const ModelTraining = ({ onNotification }) => {
       case 'stopped': return 'warning';
       default: return 'default';
     }
+  };
+
+  const getPaddleOCRModels = (language, trainType) => {
+    const models = [];
+    const langPrefix = language === 'en' ? 'en' : language === 'ch' ? 'ch' : language;
+    
+    switch (trainType) {
+      case 'det':
+        models.push(
+          { value: `${langPrefix}_PP-OCRv4_det`, label: `PaddleOCR v4 Detection (${language.toUpperCase()})` },
+          { value: `${langPrefix}_PP-OCRv3_det`, label: `PaddleOCR v3 Detection (${language.toUpperCase()})` }
+        );
+        break;
+      case 'rec':
+        models.push(
+          { value: `${langPrefix}_PP-OCRv4_rec`, label: `PaddleOCR v4 Recognition (${language.toUpperCase()})` },
+          { value: `${langPrefix}_PP-OCRv3_rec`, label: `PaddleOCR v3 Recognition (${language.toUpperCase()})` }
+        );
+        break;
+      case 'cls':
+        models.push(
+          { value: `${langPrefix}_ppocr_mobile_v2.0_cls`, label: `PaddleOCR Classification (${language.toUpperCase()})` }
+        );
+        break;
+    }
+    
+    return models;
   };
 
   const getBaseModels = (datasetType) => {
@@ -667,6 +709,8 @@ const ModelTraining = ({ onNotification }) => {
           { value: 'moondream2', label: 'Moondream2' },
           { value: 'blip2', label: 'BLIP2' },
         ];
+      case DATASET_TYPES.PADDLEOCR:
+        return getPaddleOCRModels(trainingConfig.language, trainingConfig.trainType);
       default:
         return [];
     }
@@ -1133,6 +1177,41 @@ const ModelTraining = ({ onNotification }) => {
                         onChange={(e) => setTrainingConfig({ ...trainingConfig, imageSize: parseInt(e.target.value) })}
                       />
                     </Grid>
+                    
+                    {/* PaddleOCR specific parameters */}
+                    {datasets.find(d => d.id === selectedDataset)?.dataset_type === DATASET_TYPES.PADDLEOCR && (
+                      <>
+                        <Grid item xs={6}>
+                          <FormControl fullWidth>
+                            <InputLabel>Language</InputLabel>
+                            <Select
+                              value={trainingConfig.language}
+                              onChange={(e) => setTrainingConfig({ ...trainingConfig, language: e.target.value })}
+                            >
+                              <MenuItem value="en">English</MenuItem>
+                              <MenuItem value="ch">Chinese</MenuItem>
+                              <MenuItem value="ka">Korean</MenuItem>
+                              <MenuItem value="japan">Japanese</MenuItem>
+                              <MenuItem value="fr">French</MenuItem>
+                              <MenuItem value="german">German</MenuItem>
+                            </Select>
+                          </FormControl>
+                        </Grid>
+                        <Grid item xs={6}>
+                          <FormControl fullWidth>
+                            <InputLabel>Training Type</InputLabel>
+                            <Select
+                              value={trainingConfig.trainType}
+                              onChange={(e) => setTrainingConfig({ ...trainingConfig, trainType: e.target.value })}
+                            >
+                              <MenuItem value="det">Text Detection</MenuItem>
+                              <MenuItem value="rec">Text Recognition</MenuItem>
+                              <MenuItem value="cls">Text Classification</MenuItem>
+                            </Select>
+                          </FormControl>
+                        </Grid>
+                      </>
+                    )}
                   </Grid>
                 </AccordionDetails>
               </Accordion>

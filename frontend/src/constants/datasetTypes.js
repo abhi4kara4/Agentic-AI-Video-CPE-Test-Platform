@@ -2,7 +2,8 @@
 export const DATASET_TYPES = {
   VISION_LLM: 'vision_llm',
   OBJECT_DETECTION: 'object_detection',
-  IMAGE_CLASSIFICATION: 'image_classification'
+  IMAGE_CLASSIFICATION: 'image_classification',
+  PADDLEOCR: 'paddleocr'
 };
 
 // Dataset type metadata
@@ -32,6 +33,15 @@ export const DATASET_TYPE_INFO = {
     supportedFormats: ['folder_structure', 'csv'],
     requiresBoundingBoxes: false,
     requiresTextLabels: false,
+    multiClass: false
+  },
+  [DATASET_TYPES.PADDLEOCR]: {
+    name: 'PaddleOCR Fine-tuning',
+    description: 'For fine-tuning PaddleOCR models for text detection and recognition',
+    icon: '📝',
+    supportedFormats: ['paddleocr'],
+    requiresBoundingBoxes: true,
+    requiresTextLabels: true,
     multiClass: false
   }
 };
@@ -95,6 +105,37 @@ export const CLASSIFICATION_CLASSES = {
   no_signal: { name: 'No Signal', description: 'No input signal' }
 };
 
+// PaddleOCR text types for TV/STB interfaces
+export const PADDLEOCR_TEXT_TYPES = {
+  // UI Text Elements
+  button_text: { id: 0, name: 'Button Text', color: '#FF6B6B' },
+  menu_item: { id: 1, name: 'Menu Item', color: '#4ECDC4' },
+  title_text: { id: 2, name: 'Title/Header', color: '#45B7D1' },
+  body_text: { id: 3, name: 'Body Text', color: '#96CEB4' },
+  
+  // Media Text
+  channel_name: { id: 4, name: 'Channel Name', color: '#DDA0DD' },
+  program_title: { id: 5, name: 'Program Title', color: '#FFD93D' },
+  time_display: { id: 6, name: 'Time Display', color: '#6BCB77' },
+  channel_number: { id: 7, name: 'Channel Number', color: '#FF6B9D' },
+  
+  // Subtitles and Captions
+  subtitle_text: { id: 8, name: 'Subtitle Text', color: '#C44569' },
+  caption_text: { id: 9, name: 'Caption Text', color: '#F8B500' },
+  
+  // Navigation and Controls
+  navigation_text: { id: 10, name: 'Navigation Text', color: '#786FA6' },
+  status_text: { id: 11, name: 'Status Text', color: '#303952' },
+  
+  // Error and Information
+  error_text: { id: 12, name: 'Error Text', color: '#574B90' },
+  info_text: { id: 13, name: 'Information Text', color: '#F97F51' },
+  notification_text: { id: 14, name: 'Notification Text', color: '#25CCF7' },
+  
+  // Generic
+  other_text: { id: 15, name: 'Other Text', color: '#EE5A24' }
+};
+
 // Data augmentation options
 export const AUGMENTATION_OPTIONS = {
   [DATASET_TYPES.VISION_LLM]: {
@@ -122,6 +163,16 @@ export const AUGMENTATION_OPTIONS = {
     noise: { enabled: true, amount: 'medium' },
     blur: { enabled: true, amount: 'medium' },
     compression: { enabled: true, quality: [70, 95] } // For artifact detection
+  },
+  [DATASET_TYPES.PADDLEOCR]: {
+    brightness: { enabled: true, range: [-15, 15] },
+    contrast: { enabled: true, range: [0.9, 1.1] },
+    rotation: { enabled: true, range: [-2, 2] }, // Small rotation for text
+    flip: { enabled: false }, // Don't flip text
+    noise: { enabled: false }, // Can affect text recognition
+    blur: { enabled: false }, // Can affect text clarity
+    perspective: { enabled: true, amount: 'low' }, // OCR-specific augmentation
+    elastic_transform: { enabled: true, amount: 'low' } // OCR-specific augmentation
   }
 };
 
@@ -167,6 +218,18 @@ export const EXPORT_FORMATS = {
     fileStructure: {
       data: 'labels.csv',
       images: 'images/'
+    }
+  },
+  paddleocr: {
+    name: 'PaddleOCR Format',
+    description: 'PaddleOCR training format with text detection and recognition',
+    fileStructure: {
+      images: 'images/',
+      labels: 'labels/',
+      train_list: 'train_list.txt',
+      val_list: 'val_list.txt',
+      rec_gt: 'rec_gt_train.txt',
+      det_gt: 'det_gt_train.txt'
     }
   }
 };

@@ -38,6 +38,7 @@ import {
   AccordionSummary,
   AccordionDetails,
   CardMedia,
+  Slider,
 } from '@mui/material';
 import {
   Science as TestingIcon,
@@ -695,6 +696,14 @@ const ModelTesting = ({ onNotification }) => {
     maxTokens: 200,
   });
   
+  const [paddleOCRSettings, setPaddleOCRSettings] = useState({
+    language: 'en',
+    taskType: 'det', // 'det', 'rec', or 'both'
+    confidenceThreshold: 0.5,
+    showBoundingBoxes: true,
+    showText: true
+  });
+  
   // Video analysis settings
   const [videoAnalysisSettings, setVideoAnalysisSettings] = useState({
     frameSkipFrequency: 30,
@@ -883,12 +892,20 @@ const ModelTesting = ({ onNotification }) => {
         
         console.log('Video options being sent:', videoOptions);
         
-        const response = await testingAPI.testModelWithVideo(
-          selectedModel,
-          uploadedVideo.file,
-          videoOptions
-        );
-        testData = response.data;
+        try {
+          // Try async analysis first
+          await handleAsyncVideoAnalysis(selectedModel, uploadedVideo.file, videoOptions, 'object_detection');
+          return; // Exit early - async handler will manage the results
+        } catch (error) {
+          // Fallback to synchronous analysis
+          console.log('Falling back to synchronous analysis');
+          const response = await testingAPI.testModelWithVideo(
+            selectedModel,
+            uploadedVideo.file,
+            videoOptions
+          );
+          testData = response.data;
+        }
       }
       
       if (testData) {
@@ -928,13 +945,37 @@ const ModelTesting = ({ onNotification }) => {
       
       await loadTestHistory();
     } catch (error) {
+      console.error('Object detection test error:', error);
+      
+      // Handle different error types
+      let errorMessage = 'Failed to run object detection test';
+      let errorTitle = 'Test Failed';
+      
+      if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+        errorTitle = 'Test Timeout';
+        errorMessage = 'Video analysis is taking longer than expected. The analysis may still be running on the server. Check the History tab in a few minutes for results.';
+      } else if (error.response?.status === 500) {
+        errorMessage = error.response?.data?.detail || 'Server error during analysis';
+      } else if (error.response?.data?.detail) {
+        errorMessage = error.response.data.detail;
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
       onNotification({
-        type: 'error',
-        title: 'Test Failed',
-        message: error.response?.data?.detail || 'Failed to run object detection test'
+        type: error.code === 'ECONNABORTED' ? 'warning' : 'error',
+        title: errorTitle,
+        message: errorMessage
       });
     } finally {
       setLoading(false);
+      
+      // If there was a timeout, suggest checking history
+      if (inputType === 'video') {
+        setTimeout(() => {
+          loadTestHistory(); // Refresh history in case results appeared
+        }, 2000);
+      }
     }
   };
 
@@ -985,12 +1026,20 @@ const ModelTesting = ({ onNotification }) => {
         
         console.log('Video options being sent:', videoOptions);
         
-        const response = await testingAPI.testModelWithVideo(
-          selectedModel,
-          uploadedVideo.file,
-          videoOptions
-        );
-        testData = response.data;
+        try {
+          // Try async analysis first
+          await handleAsyncVideoAnalysis(selectedModel, uploadedVideo.file, videoOptions, 'image_classification');
+          return; // Exit early - async handler will manage the results
+        } catch (error) {
+          // Fallback to synchronous analysis
+          console.log('Falling back to synchronous analysis');
+          const response = await testingAPI.testModelWithVideo(
+            selectedModel,
+            uploadedVideo.file,
+            videoOptions
+          );
+          testData = response.data;
+        }
       }
       
       if (testData) {
@@ -1100,6 +1149,206 @@ const ModelTesting = ({ onNotification }) => {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const runPaddleOCRTest = async () => {
+    if (!selectedModel) {
+      onNotification({
+        type: 'warning',
+        title: 'No Model Selected',
+        message: 'Please select a PaddleOCR model to test'
+      });
+      return;
+    }
+
+    if (inputType === 'upload' && uploadedImages.length === 0) {
+      onNotification({
+        type: 'warning',
+        title: 'No Image Selected',
+        message: 'Please upload an image to test'
+      });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      let testData;
+      
+      if (inputType === 'stream') {
+        const response = await testingAPI.testPaddleOCRModel(selectedModel, null, paddleOCRSettings);
+        testData = response.data;
+      } else if (inputType === 'upload' && uploadedImages.length > 0) {
+        const response = await testingAPI.testPaddleOCRModelWithUpload(
+          selectedModel, 
+          uploadedImages[0].file,
+          paddleOCRSettings
+        );
+        testData = response.data;
+      } else if (inputType === 'video' && uploadedVideo) {
+        const videoOptions = {
+          language: paddleOCRSettings.language,
+          task_type: paddleOCRSettings.taskType,
+          confidence_threshold: paddleOCRSettings.confidenceThreshold,
+          skipFrequency: videoAnalysisSettings.frameSkipFrequency,
+          maxFrames: videoAnalysisSettings.maxFramesToAnalyze,
+          generateVideo: videoAnalysisSettings.generateVideo
+        };
+        
+        const response = await testingAPI.testPaddleOCRModelWithVideo(
+          selectedModel,
+          uploadedVideo.file,
+          videoOptions
+        );
+        testData = response.data;
+      }
+
+      if (testData) {
+        const fullResults = {
+          ...testData,
+          confidenceThreshold: paddleOCRSettings.confidenceThreshold
+        };
+        
+        setTestResults(prev => [{
+          id: Date.now(),
+          modelName: selectedModel,
+          modelType: 'paddleocr',
+          inputType,
+          timestamp: new Date(),
+          results: fullResults,
+          settings: paddleOCRSettings
+        }, ...prev]);
+
+        onNotification({
+          type: 'success',
+          title: 'PaddleOCR Test Completed',
+          message: `Detected ${testData.detections?.length || 0} text regions`
+        });
+      }
+    } catch (error) {
+      console.error('PaddleOCR test failed:', error);
+      onNotification({
+        type: 'error',
+        title: 'Test Failed',
+        message: error.response?.data?.detail || 'Failed to run PaddleOCR test'
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAsyncVideoAnalysis = async (modelName, videoFile, options, modelType) => {
+    try {
+      // First, try async video analysis
+      const asyncResponse = await testingAPI.testModelWithVideoAsync(modelName, videoFile, options);
+      const analysisId = asyncResponse.data.analysis_id;
+      
+      onNotification({
+        type: 'info',
+        title: 'Video Analysis Started',
+        message: 'Analysis is running in the background. Results will appear when ready.'
+      });
+      
+      // Start polling for results
+      const pollForResults = async () => {
+        const maxPolls = 120; // Poll for up to 10 minutes (5-second intervals)
+        let pollCount = 0;
+        
+        const poll = async () => {
+          try {
+            const statusResponse = await testingAPI.getVideoAnalysisStatus(analysisId);
+            const status = statusResponse.data.status;
+            
+            if (status === 'completed') {
+              // Get the results
+              const resultsResponse = await testingAPI.getVideoAnalysisResults(analysisId);
+              const testData = resultsResponse.data;
+              
+              // Process and display results
+              const fullResults = {
+                ...testData,
+                analysis_id: analysisId,
+                async_analysis: true
+              };
+              
+              setTestResults(prev => [{
+                id: Date.now(),
+                modelName: modelName,
+                modelType: modelType,
+                inputType: 'video',
+                timestamp: new Date(),
+                results: fullResults,
+                settings: modelType === 'object_detection' ? objectDetectionSettings : 
+                         modelType === 'image_classification' ? classificationSettings :
+                         modelType === 'vision_llm' ? visionLLMSettings : paddleOCRSettings
+              }, ...prev]);
+              
+              onNotification({
+                type: 'success',
+                title: 'Video Analysis Completed',
+                message: `Analysis completed! Processed ${testData.total_frames_analyzed} frames.`
+              });
+              
+              setLoading(false);
+              return true; // Stop polling
+              
+            } else if (status === 'failed') {
+              throw new Error(statusResponse.data.error || 'Analysis failed');
+              
+            } else if (status === 'running') {
+              const progress = statusResponse.data.progress || {};
+              if (progress.percentage) {
+                onNotification({
+                  type: 'info',
+                  title: 'Analysis Progress',
+                  message: `Processing... ${Math.round(progress.percentage)}% complete`
+                });
+              }
+              
+              // Continue polling
+              pollCount++;
+              if (pollCount < maxPolls) {
+                setTimeout(poll, 5000); // Poll every 5 seconds
+              } else {
+                throw new Error('Analysis timed out after 10 minutes');
+              }
+            } else {
+              // Still pending, continue polling
+              pollCount++;
+              if (pollCount < maxPolls) {
+                setTimeout(poll, 5000);
+              } else {
+                throw new Error('Analysis timed out waiting to start');
+              }
+            }
+          } catch (error) {
+            console.error('Polling error:', error);
+            onNotification({
+              type: 'error',
+              title: 'Analysis Failed',
+              message: error.message || 'Failed to get analysis status'
+            });
+            setLoading(false);
+          }
+        };
+        
+        // Start polling after a short delay
+        setTimeout(poll, 2000);
+      };
+      
+      pollForResults();
+      
+    } catch (error) {
+      console.error('Async video analysis failed:', error);
+      
+      // Fallback to synchronous analysis
+      onNotification({
+        type: 'warning',
+        title: 'Falling back to synchronous analysis',
+        message: 'Async analysis failed, trying synchronous method...'
+      });
+      
+      throw error; // Re-throw to trigger fallback in calling function
     }
   };
 
@@ -1387,6 +1636,7 @@ const ModelTesting = ({ onNotification }) => {
             {selectedModelType === 'object_detection' && <Tab label="Object Detection" />}
             {selectedModelType === 'image_classification' && <Tab label="Image Classification" />}
             {selectedModelType === 'vision_llm' && <Tab label="Vision LLM" />}
+            {selectedModelType === 'paddleocr' && <Tab label="PaddleOCR" />}
             <Tab label="Results" />
             <Tab label="Performance Analysis" />
             <Tab label="History" />
@@ -1685,8 +1935,124 @@ const ModelTesting = ({ onNotification }) => {
             </Grid>
           )}
 
+          {/* PaddleOCR Testing */}
+          {activeTab === 0 && selectedModelType === 'paddleocr' && (
+            <Grid container spacing={3}>
+              <Grid item xs={12} md={6}>
+                <Card>
+                  <CardContent>
+                    <Typography variant="h6" gutterBottom>
+                      PaddleOCR Settings
+                    </Typography>
+                    
+                    <Grid container spacing={2}>
+                      <Grid item xs={6}>
+                        <FormControl fullWidth>
+                          <InputLabel>Language</InputLabel>
+                          <Select
+                            value={paddleOCRSettings.language}
+                            onChange={(e) => setPaddleOCRSettings(prev => ({ ...prev, language: e.target.value }))}
+                          >
+                            <MenuItem value="en">English</MenuItem>
+                            <MenuItem value="ch">Chinese</MenuItem>
+                            <MenuItem value="ka">Korean</MenuItem>
+                            <MenuItem value="japan">Japanese</MenuItem>
+                          </Select>
+                        </FormControl>
+                      </Grid>
+                      
+                      <Grid item xs={6}>
+                        <FormControl fullWidth>
+                          <InputLabel>Task Type</InputLabel>
+                          <Select
+                            value={paddleOCRSettings.taskType}
+                            onChange={(e) => setPaddleOCRSettings(prev => ({ ...prev, taskType: e.target.value }))}
+                          >
+                            <MenuItem value="det">Text Detection Only</MenuItem>
+                            <MenuItem value="rec">Text Recognition Only</MenuItem>
+                            <MenuItem value="both">Detection + Recognition</MenuItem>
+                          </Select>
+                        </FormControl>
+                      </Grid>
+                      
+                      <Grid item xs={12}>
+                        <Typography gutterBottom>
+                          Confidence Threshold: {paddleOCRSettings.confidenceThreshold}
+                        </Typography>
+                        <Slider
+                          value={paddleOCRSettings.confidenceThreshold}
+                          onChange={(e, value) => setPaddleOCRSettings(prev => ({ ...prev, confidenceThreshold: value }))}
+                          min={0.1}
+                          max={1.0}
+                          step={0.05}
+                          marks
+                          valueLabelDisplay="auto"
+                        />
+                      </Grid>
+                      
+                      <Grid item xs={6}>
+                        <FormControlLabel
+                          control={
+                            <Switch
+                              checked={paddleOCRSettings.showBoundingBoxes}
+                              onChange={(e) => setPaddleOCRSettings(prev => ({ ...prev, showBoundingBoxes: e.target.checked }))}
+                            />
+                          }
+                          label="Show Bounding Boxes"
+                        />
+                      </Grid>
+                      
+                      <Grid item xs={6}>
+                        <FormControlLabel
+                          control={
+                            <Switch
+                              checked={paddleOCRSettings.showText}
+                              onChange={(e) => setPaddleOCRSettings(prev => ({ ...prev, showText: e.target.checked }))}
+                            />
+                          }
+                          label="Show Recognized Text"
+                        />
+                      </Grid>
+                    </Grid>
+                  </CardContent>
+                </Card>
+              </Grid>
+              
+              <Grid item xs={12} md={6}>
+                <Card>
+                  <CardContent>
+                    <Typography variant="h6" gutterBottom>
+                      Test Controls
+                    </Typography>
+                    
+                    <Button
+                      variant="contained"
+                      fullWidth
+                      startIcon={loading ? <CircularProgress size={16} /> : <TestingIcon />}
+                      onClick={runPaddleOCRTest}
+                      disabled={loading || !selectedModel}
+                      sx={{ mb: 2 }}
+                    >
+                      {loading ? 'Processing...' : 'Run Text Analysis'}
+                    </Button>
+
+                    <Button
+                      variant="outlined"
+                      fullWidth
+                      startIcon={isLiveTesting ? <StopIcon /> : <PlayIcon />}
+                      onClick={isLiveTesting ? stopLiveTesting : startLiveTesting}
+                      disabled={loading || !selectedModel}
+                    >
+                      {isLiveTesting ? 'Stop Live Testing' : 'Start Live Testing'}
+                    </Button>
+                  </CardContent>
+                </Card>
+              </Grid>
+            </Grid>
+          )}
+
           {/* Results Tab */}
-          {(activeTab === 1 || (activeTab === 0 && !['object_detection', 'image_classification', 'vision_llm'].includes(selectedModelType))) && (
+          {(activeTab === 1 || (activeTab === 0 && !['object_detection', 'image_classification', 'vision_llm', 'paddleocr'].includes(selectedModelType))) && (
             <Card>
               <CardContent>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -2066,42 +2432,182 @@ const ModelTesting = ({ onNotification }) => {
           {activeTab === 3 && (
             <Card>
               <CardContent>
-                <Typography variant="h6" gutterBottom>
-                  Test History
-                </Typography>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                  <Typography variant="h6">
+                    Test History
+                  </Typography>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    onClick={loadTestHistory}
+                    disabled={loading}
+                  >
+                    Refresh
+                  </Button>
+                </Box>
                 
                 {testHistory.length === 0 ? (
                   <Alert severity="info">
                     No test history available.
                   </Alert>
                 ) : (
-                  <List>
+                  <Box sx={{ maxHeight: 600, overflow: 'auto' }}>
                     {testHistory.slice(0, 20).map((test, index) => (
-                      <ListItem key={test.test_id || index} divider>
-                        <ListItemText
-                          primary={
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <Typography variant="body2">
+                      <Accordion key={test.test_id || index} sx={{ mb: 1 }}>
+                        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', pr: 2 }}>
+                            <Box>
+                              <Typography variant="subtitle1">
                                 {test.test_type === 'comparison' ? 
-                                  `Comparison: ${test.models_tested?.join(', ')}` :
+                                  `Model Comparison` :
                                   test.test_type === 'benchmark' ? 
-                                    `Benchmark: ${test.model}` :
-                                    `Test: ${test.model}`
+                                    `Benchmark Test` :
+                                    `Model Test`
                                 }
                               </Typography>
+                              <Typography variant="body2" color="text.secondary">
+                                {test.test_type === 'comparison' ? 
+                                  `${test.models_tested?.join(', ')}` :
+                                  `${test.model || test.model_name || 'Unknown Model'}`
+                                } • {new Date(test.created_at || test.timestamp).toLocaleString()}
+                              </Typography>
+                            </Box>
+                            <Box sx={{ display: 'flex', gap: 1 }}>
                               <Chip 
-                                label={test.test_type} 
+                                label={test.test_type || 'test'} 
                                 size="small" 
                                 color={test.test_type === 'comparison' ? 'secondary' : 
                                        test.test_type === 'benchmark' ? 'primary' : 'default'} 
                               />
+                              {test.input_type && (
+                                <Chip 
+                                  label={test.input_type} 
+                                  size="small" 
+                                  variant="outlined"
+                                />
+                              )}
                             </Box>
-                          }
-                          secondary={new Date(test.created_at).toLocaleString()}
-                        />
-                      </ListItem>
+                          </Box>
+                        </AccordionSummary>
+                        <AccordionDetails>
+                          <Grid container spacing={2}>
+                            {/* Test Details */}
+                            <Grid item xs={12} md={6}>
+                              <Typography variant="subtitle2" gutterBottom>
+                                Test Information
+                              </Typography>
+                              <Table size="small">
+                                <TableBody>
+                                  <TableRow>
+                                    <TableCell><strong>Model</strong></TableCell>
+                                    <TableCell>{test.model || test.model_name || 'N/A'}</TableCell>
+                                  </TableRow>
+                                  <TableRow>
+                                    <TableCell><strong>Type</strong></TableCell>
+                                    <TableCell>{test.model_type || test.test_type || 'N/A'}</TableCell>
+                                  </TableRow>
+                                  <TableRow>
+                                    <TableCell><strong>Input</strong></TableCell>
+                                    <TableCell>{test.input_type || 'N/A'}</TableCell>
+                                  </TableRow>
+                                  <TableRow>
+                                    <TableCell><strong>Timestamp</strong></TableCell>
+                                    <TableCell>{new Date(test.created_at || test.timestamp).toLocaleString()}</TableCell>
+                                  </TableRow>
+                                  {test.processing_time && (
+                                    <TableRow>
+                                      <TableCell><strong>Processing Time</strong></TableCell>
+                                      <TableCell>{test.processing_time}s</TableCell>
+                                    </TableRow>
+                                  )}
+                                </TableBody>
+                              </Table>
+                            </Grid>
+                            
+                            {/* Test Results */}
+                            <Grid item xs={12} md={6}>
+                              <Typography variant="subtitle2" gutterBottom>
+                                Results Summary
+                              </Typography>
+                              {test.results ? (
+                                <Box>
+                                  {test.results.detections && (
+                                    <Typography variant="body2" sx={{ mb: 1 }}>
+                                      <strong>Detections:</strong> {test.results.detections.length} objects found
+                                    </Typography>
+                                  )}
+                                  {test.results.total_frames_analyzed && (
+                                    <Typography variant="body2" sx={{ mb: 1 }}>
+                                      <strong>Frames Analyzed:</strong> {test.results.total_frames_analyzed}
+                                    </Typography>
+                                  )}
+                                  {test.results.video_duration && (
+                                    <Typography variant="body2" sx={{ mb: 1 }}>
+                                      <strong>Video Duration:</strong> {test.results.video_duration.toFixed(1)}s
+                                    </Typography>
+                                  )}
+                                  {test.results.analysis && (
+                                    <Typography variant="body2" sx={{ mb: 1 }}>
+                                      <strong>Analysis:</strong> {test.results.analysis.substring(0, 100)}
+                                      {test.results.analysis.length > 100 ? '...' : ''}
+                                    </Typography>
+                                  )}
+                                </Box>
+                              ) : (
+                                <Typography variant="body2" color="text.secondary">
+                                  No detailed results available
+                                </Typography>
+                              )}
+                            </Grid>
+                            
+                            {/* Settings Used */}
+                            {test.settings && (
+                              <Grid item xs={12}>
+                                <Typography variant="subtitle2" gutterBottom>
+                                  Test Settings
+                                </Typography>
+                                <Box sx={{ 
+                                  backgroundColor: 'grey.50', 
+                                  p: 1, 
+                                  borderRadius: 1,
+                                  maxHeight: 200,
+                                  overflow: 'auto'
+                                }}>
+                                  <pre style={{ fontSize: '0.75rem', margin: 0 }}>
+                                    {JSON.stringify(test.settings, null, 2)}
+                                  </pre>
+                                </Box>
+                              </Grid>
+                            )}
+                            
+                            {/* Test Image/Results */}
+                            {test.results?.image_url && (
+                              <Grid item xs={12}>
+                                <Typography variant="subtitle2" gutterBottom>
+                                  Result Image
+                                </Typography>
+                                <Box sx={{ textAlign: 'center' }}>
+                                  <img 
+                                    src={test.results.image_url} 
+                                    alt="Test Result"
+                                    style={{ 
+                                      maxWidth: '100%', 
+                                      maxHeight: '300px',
+                                      border: '1px solid #ddd',
+                                      borderRadius: '4px'
+                                    }}
+                                    onError={(e) => {
+                                      e.target.style.display = 'none';
+                                    }}
+                                  />
+                                </Box>
+                              </Grid>
+                            )}
+                          </Grid>
+                        </AccordionDetails>
+                      </Accordion>
                     ))}
-                  </List>
+                  </Box>
                 )}
               </CardContent>
             </Card>

@@ -33,6 +33,7 @@ import {
   SmartToy as VisionIcon,
   CropFree as DetectionIcon,
   Label as ClassificationIcon,
+  TextFields as OCRIcon,
   ExpandMore as ExpandIcon,
   ExpandLess as CollapseIcon,
   Tune as AugmentationIcon,
@@ -46,6 +47,7 @@ import {
   DATASET_TYPE_INFO, 
   OBJECT_DETECTION_CLASSES,
   CLASSIFICATION_CLASSES,
+  PADDLEOCR_TEXT_TYPES,
   AUGMENTATION_OPTIONS 
 } from '../constants/datasetTypes.js';
 
@@ -62,6 +64,9 @@ const DatasetTypeSelector = ({ open, onClose, onSelect, currentConfig }) => {
   );
   const [customClassificationClasses, setCustomClassificationClasses] = useState(
     currentConfig?.customClasses?.image_classification || { ...CLASSIFICATION_CLASSES }
+  );
+  const [customPaddleOCRTextTypes, setCustomPaddleOCRTextTypes] = useState(
+    currentConfig?.customClasses?.paddleocr || { ...PADDLEOCR_TEXT_TYPES }
   );
   const [showCustomClasses, setShowCustomClasses] = useState(false);
   const [newClassName, setNewClassName] = useState('');
@@ -110,6 +115,18 @@ const DatasetTypeSelector = ({ open, onClose, onSelect, currentConfig }) => {
           description: newClassDescription.trim() || `Custom class: ${newClassName.trim()}`
         }
       }));
+    } else if (selectedType === DATASET_TYPES.PADDLEOCR) {
+      const nextId = Math.max(...Object.values(customPaddleOCRTextTypes).map(c => c.id), -1) + 1;
+      const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#DDA0DD', '#FFD93D', '#6BCB77', '#FF6B9D', '#C44569', '#F8B500'];
+      
+      setCustomPaddleOCRTextTypes(prev => ({
+        ...prev,
+        [key]: {
+          id: nextId,
+          name: newClassName.trim(),
+          color: colors[nextId % colors.length]
+        }
+      }));
     }
     
     setNewClassName('');
@@ -129,6 +146,12 @@ const DatasetTypeSelector = ({ open, onClose, onSelect, currentConfig }) => {
         delete newClasses[classKey];
         return newClasses;
       });
+    } else if (selectedType === DATASET_TYPES.PADDLEOCR) {
+      setCustomPaddleOCRTextTypes(prev => {
+        const newClasses = { ...prev };
+        delete newClasses[classKey];
+        return newClasses;
+      });
     }
   };
 
@@ -137,6 +160,8 @@ const DatasetTypeSelector = ({ open, onClose, onSelect, currentConfig }) => {
       setCustomObjectDetectionClasses({ ...OBJECT_DETECTION_CLASSES });
     } else if (selectedType === DATASET_TYPES.IMAGE_CLASSIFICATION) {
       setCustomClassificationClasses({ ...CLASSIFICATION_CLASSES });
+    } else if (selectedType === DATASET_TYPES.PADDLEOCR) {
+      setCustomPaddleOCRTextTypes({ ...PADDLEOCR_TEXT_TYPES });
     }
   };
 
@@ -148,7 +173,8 @@ const DatasetTypeSelector = ({ open, onClose, onSelect, currentConfig }) => {
       augmentationOptions: augmentationOptions,
       customClasses: {
         object_detection: customObjectDetectionClasses,
-        image_classification: customClassificationClasses
+        image_classification: customClassificationClasses,
+        paddleocr: customPaddleOCRTextTypes
       }
     });
     onClose();
@@ -162,6 +188,8 @@ const DatasetTypeSelector = ({ open, onClose, onSelect, currentConfig }) => {
         return <DetectionIcon sx={{ fontSize: 40, color: 'secondary.main' }} />;
       case DATASET_TYPES.IMAGE_CLASSIFICATION:
         return <ClassificationIcon sx={{ fontSize: 40, color: 'success.main' }} />;
+      case DATASET_TYPES.PADDLEOCR:
+        return <OCRIcon sx={{ fontSize: 40, color: 'info.main' }} />;
       default:
         return null;
     }
@@ -311,6 +339,87 @@ const DatasetTypeSelector = ({ open, onClose, onSelect, currentConfig }) => {
               </Box>
               <Alert severity="info" sx={{ fontSize: '0.75rem' }}>
                 Add or remove classes for your specific use case. Default classes cover common TV/STB states and anomalies.
+              </Alert>
+            </Box>
+          </Collapse>
+        </Box>
+      );
+    }
+    
+    if (type === DATASET_TYPES.PADDLEOCR) {
+      return (
+        <Box sx={{ mt: 2 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+            <Typography variant="subtitle2">
+              Text Types ({Object.keys(customPaddleOCRTextTypes).length}):
+            </Typography>
+            <Button
+              size="small"
+              startIcon={<EditIcon />}
+              onClick={() => setShowCustomClasses(!showCustomClasses)}
+              variant={showCustomClasses ? "contained" : "outlined"}
+            >
+              {showCustomClasses ? 'Hide Editor' : 'Customize Text Types'}
+            </Button>
+          </Box>
+          
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 1 }}>
+            {Object.entries(customPaddleOCRTextTypes).map(([key, textType]) => (
+              <Chip
+                key={key}
+                label={textType.name}
+                size="small"
+                sx={{ 
+                  backgroundColor: textType.color + '20',
+                  color: textType.color,
+                  border: `1px solid ${textType.color}40`,
+                  fontWeight: 500 
+                }}
+                deleteIcon={showCustomClasses ? <DeleteIcon /> : undefined}
+                onDelete={showCustomClasses ? () => removeCustomClass(key) : undefined}
+              />
+            ))}
+          </Box>
+
+          <Collapse in={showCustomClasses}>
+            <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1, mt: 1 }}>
+              <Grid container spacing={2}>
+                <Grid item xs={12} sm={8}>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="Text Type Name"
+                    value={newClassName}
+                    onChange={(e) => setNewClassName(e.target.value)}
+                    placeholder="e.g., Menu Title, Button Label"
+                  />
+                </Grid>
+                <Grid item xs={12} sm={4}>
+                  <Button
+                    fullWidth
+                    variant="contained"
+                    size="small"
+                    startIcon={<AddIcon />}
+                    onClick={addCustomClass}
+                    disabled={!newClassName.trim()}
+                  >
+                    Add Text Type
+                  </Button>
+                </Grid>
+              </Grid>
+              <Box sx={{ display: 'flex', gap: 1, mt: 2 }}>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  color="error"
+                  onClick={resetToDefaultClasses}
+                  title="Reset to default text types"
+                >
+                  Reset
+                </Button>
+              </Box>
+              <Alert severity="info" sx={{ fontSize: '0.75rem', mt: 1 }}>
+                Add or remove text types for your OCR use case. Default types cover common TV/STB text elements.
               </Alert>
             </Box>
           </Collapse>

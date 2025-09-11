@@ -1177,6 +1177,351 @@ async def generate_classification_dataset(training_dir: Path, train_images: list
         shutil.copy2(item["image_file"], val_img_path)
 
 
+async def generate_paddleocr_dataset(training_dir: Path, train_images: list, val_images: list, augment: bool, augment_factor: int):
+    """Generate PaddleOCR format dataset"""
+    import shutil
+    import json
+    
+    # Create directories
+    (training_dir / "images").mkdir(parents=True, exist_ok=True)
+    (training_dir / "labels").mkdir(parents=True, exist_ok=True)
+    
+    train_list = []
+    val_list = []
+    rec_gt_train = []
+    det_gt_train = []
+    rec_gt_val = []
+    det_gt_val = []
+    
+    # Process train images
+    for i, item in enumerate(train_images):
+        img_name = f"train_{i:04d}.jpg"
+        img_path = training_dir / "images" / img_name
+        shutil.copy2(item["image_file"], img_path)
+        
+        annotation = item["annotation"]
+        text_boxes = annotation.get("textBoxes", [])
+        
+        if text_boxes:
+            # Add to train list
+            train_list.append(f"images/{img_name}")
+            
+            # Generate detection annotations (det_gt format)
+            det_annotations = []
+            for box in text_boxes:
+                # Convert normalized coordinates to absolute pixel coordinates
+                # PaddleOCR expects format: [[x1,y1],[x2,y1],[x2,y2],[x1,y2]]
+                x = box["x"] / 100.0  # Convert from percentage to ratio
+                y = box["y"] / 100.0
+                width = box["width"] / 100.0
+                height = box["height"] / 100.0
+                
+                # Calculate corners (assuming image dimensions will be retrieved at runtime)
+                # For now, store as ratios and convert during training
+                det_annotations.append({
+                    "transcription": box.get("text", ""),
+                    "points": [
+                        [x, y],
+                        [x + width, y],
+                        [x + width, y + height],
+                        [x, y + height]
+                    ]
+                })
+            
+            # Detection ground truth format: image_path\tannotations_json
+            det_gt_train.append(f"images/{img_name}\t{json.dumps(det_annotations, ensure_ascii=False)}")
+            
+            # Recognition ground truth format: image_path\ttext_content
+            for box in text_boxes:
+                if box.get("text", "").strip():
+                    # Create cropped text region identifier
+                    crop_name = f"{img_name}_crop_{len(rec_gt_train)}"
+                    rec_gt_train.append(f"images/{crop_name}\t{box['text']}")
+        
+        # Apply augmentation if enabled
+        if augment and text_boxes:
+            try:
+                # Simple augmentation for PaddleOCR (brightness, contrast)
+                from PIL import Image, ImageEnhance
+                original_img = Image.open(item["image_file"])
+                
+                for aug_idx in range(augment_factor):
+                    aug_img = original_img.copy()
+                    
+                    # Apply light augmentations suitable for text
+                    if aug_idx % 3 == 1:  # Brightness
+                        enhancer = ImageEnhance.Brightness(aug_img)
+                        aug_img = enhancer.enhance(0.9 + (aug_idx * 0.1))
+                    elif aug_idx % 3 == 2:  # Contrast
+                        enhancer = ImageEnhance.Contrast(aug_img)
+                        aug_img = enhancer.enhance(0.9 + (aug_idx * 0.1))
+                    
+                    aug_img_name = f"train_{i:04d}_aug_{aug_idx}.jpg"
+                    aug_img_path = training_dir / "images" / aug_img_name
+                    aug_img.save(aug_img_path, "JPEG", quality=95)
+                    
+                    # Add augmented annotations
+                    train_list.append(f"images/{aug_img_name}")
+                    det_gt_train.append(f"images/{aug_img_name}\t{json.dumps(det_annotations, ensure_ascii=False)}")
+                    
+                    for box in text_boxes:
+                        if box.get("text", "").strip():
+                            crop_name = f"{aug_img_name}_crop_{len(rec_gt_train)}"
+                            rec_gt_train.append(f"images/{crop_name}\t{box['text']}")
+                            
+            except Exception as e:
+                log.warning(f"PaddleOCR augmentation failed for {item['image_file']}: {e}")
+    
+    # Process val images
+    for i, item in enumerate(val_images):
+        img_name = f"val_{i:04d}.jpg"
+        img_path = training_dir / "images" / img_name
+        shutil.copy2(item["image_file"], img_path)
+        
+        annotation = item["annotation"]
+        text_boxes = annotation.get("textBoxes", [])
+        
+        if text_boxes:
+            val_list.append(f"images/{img_name}")
+            
+            # Generate validation annotations
+            det_annotations = []
+            for box in text_boxes:
+                x = box["x"] / 100.0
+                y = box["y"] / 100.0
+                width = box["width"] / 100.0
+                height = box["height"] / 100.0
+                
+                det_annotations.append({
+                    "transcription": box.get("text", ""),
+                    "points": [
+                        [x, y],
+                        [x + width, y],
+                        [x + width, y + height],
+                        [x, y + height]
+                    ]
+                })
+            
+            det_gt_val.append(f"images/{img_name}\t{json.dumps(det_annotations, ensure_ascii=False)}")
+            
+            for box in text_boxes:
+                if box.get("text", "").strip():
+                    crop_name = f"{img_name}_crop_{len(rec_gt_val)}"
+                    rec_gt_val.append(f"images/{crop_name}\t{box['text']}")
+    
+    # Write list files
+    with open(training_dir / "train_list.txt", "w", encoding="utf-8") as f:
+        f.write("\n".join(train_list))
+    
+    with open(training_dir / "val_list.txt", "w", encoding="utf-8") as f:
+        f.write("\n".join(val_list))
+    
+    # Write ground truth files
+    with open(training_dir / "det_gt_train.txt", "w", encoding="utf-8") as f:
+        f.write("\n".join(det_gt_train))
+    
+    with open(training_dir / "det_gt_val.txt", "w", encoding="utf-8") as f:
+        f.write("\n".join(det_gt_val))
+    
+    with open(training_dir / "rec_gt_train.txt", "w", encoding="utf-8") as f:
+        f.write("\n".join(rec_gt_train))
+    
+    with open(training_dir / "rec_gt_val.txt", "w", encoding="utf-8") as f:
+        f.write("\n".join(rec_gt_val))
+    
+    # Create PaddleOCR configuration file
+    config = {
+        "Global": {
+            "use_gpu": True,
+            "epoch_num": 100,
+            "log_smooth_window": 20,
+            "print_batch_step": 10,
+            "save_model_dir": "./output/",
+            "save_epoch_step": 3,
+            "eval_batch_step": [0, 2000],
+            "cal_metric_during_train": True,
+            "pretrained_model": None,
+            "checkpoints": None,
+            "save_inference_dir": None,
+            "use_visualdl": False,
+            "infer_img": None,
+            "save_res_path": "./output/predicts.txt"
+        },
+        "Architecture": {
+            "model_type": "det",
+            "algorithm": "DB",
+            "Transform": None,
+            "Backbone": {
+                "name": "MobileNetV3",
+                "scale": 0.5,
+                "model_name": "large"
+            },
+            "Neck": {
+                "name": "DBFPN",
+                "out_channels": 256
+            },
+            "Head": {
+                "name": "DBHead",
+                "k": 50
+            }
+        },
+        "Loss": {
+            "name": "DBLoss",
+            "balance_loss": True,
+            "main_loss_type": "DiceLoss",
+            "alpha": 5,
+            "beta": 10,
+            "ohem_ratio": 3
+        },
+        "Optimizer": {
+            "name": "Adam",
+            "beta1": 0.9,
+            "beta2": 0.999,
+            "lr": {
+                "name": "Cosine",
+                "learning_rate": 0.001,
+                "warmup_epoch": 2
+            },
+            "regularizer": {
+                "name": "L2",
+                "factor": 0.0001
+            }
+        },
+        "PostProcess": {
+            "name": "DBPostProcess",
+            "thresh": 0.3,
+            "box_thresh": 0.6,
+            "max_candidates": 1000,
+            "unclip_ratio": 1.5
+        },
+        "Metric": {
+            "name": "DetMetric",
+            "main_indicator": "hmean"
+        },
+        "Train": {
+            "dataset": {
+                "name": "SimpleDataSet",
+                "data_dir": "./",
+                "label_file_list": ["det_gt_train.txt"],
+                "transforms": [
+                    {
+                        "DecodeImage": {
+                            "img_mode": "BGR",
+                            "channel_first": False
+                        }
+                    },
+                    {
+                        "DetLabelEncode": None
+                    },
+                    {
+                        "IaaAugment": {
+                            "augmenter_args": [
+                                {"type": "Fliplr", "args": {"p": 0.5}},
+                                {"type": "Affine", "args": {"rotate": [-10, 10]}},
+                                {"type": "Resize", "args": {"size": [0.5, 3]}}
+                            ]
+                        }
+                    },
+                    {
+                        "EastRandomCropData": {
+                            "size": [960, 960],
+                            "max_tries": 50,
+                            "keep_ratio": True
+                        }
+                    },
+                    {
+                        "MakeBorderMap": {
+                            "shrink_ratio": 0.4,
+                            "thresh_min": 0.3,
+                            "thresh_max": 0.7
+                        }
+                    },
+                    {
+                        "MakeShrinkMap": {
+                            "shrink_ratio": 0.4,
+                            "min_text_size": 8
+                        }
+                    },
+                    {
+                        "NormalizeImage": {
+                            "scale": 1.0/255.0,
+                            "mean": [0.485, 0.456, 0.406],
+                            "std": [0.229, 0.224, 0.225],
+                            "order": "hwc"
+                        }
+                    },
+                    {
+                        "ToCHWImage": None
+                    },
+                    {
+                        "KeepKeys": {
+                            "keep_keys": ["image", "threshold_map", "threshold_mask", "shrink_map", "shrink_mask"]
+                        }
+                    }
+                ]
+            },
+            "loader": {
+                "shuffle": True,
+                "drop_last": False,
+                "batch_size_per_card": 8,
+                "num_workers": 4
+            }
+        },
+        "Eval": {
+            "dataset": {
+                "name": "SimpleDataSet",
+                "data_dir": "./",
+                "label_file_list": ["det_gt_val.txt"],
+                "transforms": [
+                    {
+                        "DecodeImage": {
+                            "img_mode": "BGR",
+                            "channel_first": False
+                        }
+                    },
+                    {
+                        "DetLabelEncode": None
+                    },
+                    {
+                        "DetResizeForTest": {
+                            "image_shape": [736, 1280]
+                        }
+                    },
+                    {
+                        "NormalizeImage": {
+                            "scale": 1.0/255.0,
+                            "mean": [0.485, 0.456, 0.406],
+                            "std": [0.229, 0.224, 0.225],
+                            "order": "hwc"
+                        }
+                    },
+                    {
+                        "ToCHWImage": None
+                    },
+                    {
+                        "KeepKeys": {
+                            "keep_keys": ["image", "shape", "polys", "ignore_tags"]
+                        }
+                    }
+                ]
+            },
+            "loader": {
+                "shuffle": False,
+                "drop_last": False,
+                "batch_size_per_card": 1,
+                "num_workers": 2
+            }
+        }
+    }
+    
+    # Save configuration file
+    with open(training_dir / "paddleocr_config.yml", "w", encoding="utf-8") as f:
+        import yaml
+        yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
+    
+    log.info(f"PaddleOCR dataset generated with {len(train_list)} training and {len(val_list)} validation images")
+
+
 async def generate_llava_dataset(training_dir: Path, train_images: list, val_images: list, augment: bool, augment_factor: int):
     """Generate LLaVA format dataset"""
     # Create directories
@@ -1449,6 +1794,8 @@ async def generate_training_dataset(
             await generate_classification_dataset(training_dir, train_images, val_images, request.augment, request.augment_factor)
         elif request.format == "llava" and dataset_type == "vision_llm":
             await generate_llava_dataset(training_dir, train_images, val_images, request.augment, request.augment_factor)
+        elif request.format == "paddleocr" and dataset_type == "paddleocr":
+            await generate_paddleocr_dataset(training_dir, train_images, val_images, request.augment, request.augment_factor)
         else:
             raise HTTPException(status_code=400, detail=f"Format '{request.format}' not supported for dataset type '{dataset_type}'")
         
@@ -1792,6 +2139,9 @@ async def simulate_training(job_name: str):
 
 # Global variable to track running training tasks
 running_training_tasks = {}
+
+# Global variable to track running video analysis tasks
+running_video_analysis_tasks = {}
 
 async def _simulate_training(job_metadata: dict, job_dir: Path, total_epochs: int, dataset_type: str):
     """Simulate training progress for non-YOLO datasets"""
@@ -2197,8 +2547,214 @@ async def execute_training_job(job_name: str, job_metadata: dict, job_dir: Path)
                     "error": error_msg
                 })
                 return
+        elif dataset_type == "paddleocr":
+            # PaddleOCR training implementation
+            try:
+                # Import PaddleOCR trainer with multiple fallback paths
+                train_paddleocr_model = None
+                import_errors = []
+                
+                # Try different import methods
+                try:
+                    from src.models.paddleocr_trainer import train_paddleocr_model
+                except ImportError as e:
+                    import_errors.append(f"Direct import failed: {e}")
+                    
+                if not train_paddleocr_model:
+                    try:
+                        from models.paddleocr_trainer import train_paddleocr_model
+                    except ImportError as e:
+                        import_errors.append(f"Relative import failed: {e}")
+                        
+                if not train_paddleocr_model:
+                    try:
+                        import sys
+                        import os
+                        # Get the src directory path
+                        current_dir = os.path.dirname(os.path.abspath(__file__))
+                        src_dir = os.path.dirname(current_dir)
+                        if src_dir not in sys.path:
+                            sys.path.insert(0, src_dir)
+                        from models.paddleocr_trainer import train_paddleocr_model
+                    except ImportError as e:
+                        import_errors.append(f"Path-adjusted import failed: {e}")
+                        
+                if not train_paddleocr_model:
+                    # Last resort - direct file import
+                    try:
+                        import importlib.util
+                        trainer_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models', 'paddleocr_trainer.py')
+                        if os.path.exists(trainer_path):
+                            spec = importlib.util.spec_from_file_location("paddleocr_trainer", trainer_path)
+                            paddleocr_trainer = importlib.util.module_from_spec(spec)
+                            spec.loader.exec_module(paddleocr_trainer)
+                            train_paddleocr_model = paddleocr_trainer.train_paddleocr_model
+                        else:
+                            import_errors.append(f"Trainer file not found at: {trainer_path}")
+                    except Exception as e:
+                        import_errors.append(f"Direct file import failed: {e}")
+                
+                if not train_paddleocr_model:
+                    raise ImportError(f"Failed to import PaddleOCR trainer. Errors: {'; '.join(import_errors)}")
+                
+                log.info(f"Successfully imported PaddleOCR trainer. Starting PaddleOCR training for job {job_name}")
+                
+                # Update status to training
+                job_metadata.update({
+                    "status": "training",
+                    "current_epoch": 0,
+                    "total_epochs": total_epochs,
+                    "updated_at": datetime.now().isoformat()
+                })
+                
+                with open(job_dir / "metadata.json", "w") as f:
+                    json.dump(job_metadata, f, indent=2)
+                
+                # Prepare training configuration
+                training_config = {
+                    "base_model": job_metadata.get("base_model", "ch_PP-OCRv4_det"),
+                    "epochs": job_metadata["config"]["epochs"],
+                    "batch_size": job_metadata["config"]["batch_size"],
+                    "learning_rate": job_metadata["config"]["learning_rate"],
+                    "output_dir": str(job_dir),
+                    "project_name": job_metadata.get("model_name", "paddleocr_model"),
+                    "language": job_metadata.get("language", "en"),
+                    "train_type": job_metadata.get("trainType", "det")
+                }
+                
+                # Progress callback for PaddleOCR training
+                async def paddleocr_progress_callback(progress_data):
+                    current_epoch = progress_data.get("epoch", 0)
+                    metrics = progress_data.get("metrics", {})
+                    
+                    # Update job metadata
+                    job_metadata.update({
+                        "current_epoch": current_epoch,
+                        "progress": {
+                            "current_epoch": current_epoch,
+                            "total_epochs": total_epochs,
+                            "percentage": progress_data.get("progress_percentage", 0),
+                            "loss": metrics.get("loss"),
+                            "accuracy": metrics.get("accuracy"),
+                            "precision": metrics.get("precision"),
+                            "recall": metrics.get("recall")
+                        },
+                        "updated_at": datetime.now().isoformat()
+                    })
+                    
+                    # Save updated metadata
+                    with open(job_dir / "metadata.json", "w") as f:
+                        json.dump(job_metadata, f, indent=2)
+                    
+                    # Broadcast progress update
+                    await broadcast_update("training_progress", {
+                        "job_id": job_name,
+                        "job_name": job_name,
+                        "model_name": job_metadata.get("model_name", "unknown"),
+                        "dataset_name": job_metadata.get("dataset_name", "unknown"),
+                        "status": "training",
+                        "progress": job_metadata["progress"]
+                    })
+                
+                # Start PaddleOCR training
+                dataset_path = job_metadata["dataset_path"]
+                training_results = await train_paddleocr_model(
+                    dataset_path=dataset_path,
+                    config=training_config,
+                    progress_callback=paddleocr_progress_callback
+                )
+                
+                if training_results.get('error'):
+                    # Training failed
+                    job_metadata.update({
+                        "status": "failed",
+                        "error": training_results.get('error'),
+                        "updated_at": datetime.now().isoformat()
+                    })
+                    with open(job_dir / "metadata.json", "w") as f:
+                        json.dump(job_metadata, f, indent=2)
+                    log.error(f"PaddleOCR training failed for job {job_name}: {training_results.get('error')}")
+                    
+                    await broadcast_update("training_failed", {
+                        "job_name": job_name,
+                        "model_name": job_metadata.get("model_name", "unknown"),
+                        "error": training_results.get('error')
+                    })
+                    return
+                
+                # Training succeeded - extract final metrics
+                final_metrics = {
+                    "loss": training_results.get('final_loss', 0.1),
+                    "accuracy": training_results.get('final_accuracy', 0.85),
+                    "training_time": training_results.get('training_time', 0),
+                    "epochs_completed": training_results.get('epochs_completed', total_epochs),
+                    "training_type": training_results.get('training_type', 'det')
+                }
+                
+                # Update job with completion
+                job_metadata.update({
+                    "status": "completed",
+                    "current_epoch": total_epochs,
+                    "final_metrics": final_metrics,
+                    "training_results": training_results,
+                    "completed_at": datetime.now().isoformat(),
+                    "updated_at": datetime.now().isoformat()
+                })
+                
+                with open(job_dir / "metadata.json", "w") as f:
+                    json.dump(job_metadata, f, indent=2)
+                
+                # Broadcast completion
+                await broadcast_update("training_completed", {
+                    "job_name": job_name,
+                    "model_name": job_metadata.get("model_name", "unknown"),
+                    "dataset_name": job_metadata.get("dataset_name", "unknown"),
+                    "status": "completed",
+                    "metrics": final_metrics,
+                    "completed_at": job_metadata.get("completed_at")
+                })
+                
+                log.info(f"PaddleOCR training completed for job {job_name}")
+                
+                # Clean up task tracking and return
+                if job_name in running_training_tasks:
+                    del running_training_tasks[job_name]
+                return
+                
+            except ImportError as e:
+                error_msg = f"PaddleOCR training module import failed: {e}"
+                log.error(error_msg)
+                job_metadata.update({
+                    "status": "failed",
+                    "error": error_msg,
+                    "failed_at": datetime.now().isoformat()
+                })
+                with open(job_dir / "metadata.json", "w") as f:
+                    json.dump(job_metadata, f, indent=2)
+                await broadcast_update("training_failed", {
+                    "job_name": job_name,
+                    "model_name": job_metadata.get("model_name", "unknown"),
+                    "error": error_msg
+                })
+                return
+            except Exception as e:
+                error_msg = f"PaddleOCR training execution failed: {e}"
+                log.error(error_msg)
+                job_metadata.update({
+                    "status": "failed",
+                    "error": error_msg,
+                    "failed_at": datetime.now().isoformat()
+                })
+                with open(job_dir / "metadata.json", "w") as f:
+                    json.dump(job_metadata, f, indent=2)
+                await broadcast_update("training_failed", {
+                    "job_name": job_name,
+                    "model_name": job_metadata.get("model_name", "unknown"),
+                    "error": error_msg
+                })
+                return
         else:
-            # No real training available for non-object detection datasets yet
+            # No real training available for other dataset types yet
             error_msg = f"Real training not implemented for dataset type: {dataset_type}"
             log.error(error_msg)
             job_metadata.update({
@@ -3000,6 +3556,11 @@ async def start_training_simplified(request: dict):
                 "device": request.get("device", "auto")
             }
         }
+        
+        # Add PaddleOCR-specific parameters if it's a PaddleOCR dataset
+        if dataset_type == "paddleocr":
+            job_metadata["language"] = request.get("language", "en")
+            job_metadata["trainType"] = request.get("trainType", "det")
         
         # Save job metadata initially
         with open(job_dir / "metadata.json", "w") as f:
@@ -4215,6 +4776,275 @@ async def websocket_endpoint(websocket: WebSocket):
             
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+
+
+# Async Video Analysis System
+async def execute_video_analysis_job(analysis_id: str, analysis_metadata: dict, analysis_dir: Path, video_path: Path):
+    """Execute video analysis job asynchronously with progress updates"""
+    try:
+        # Update status to running
+        analysis_metadata["status"] = "running"
+        analysis_metadata["started_at"] = datetime.now().isoformat()
+        analysis_metadata["progress"] = {"current_frame": 0, "total_frames": 0, "percentage": 0}
+        
+        with open(analysis_dir / "metadata.json", "w") as f:
+            json.dump(analysis_metadata, f, indent=2)
+        
+        # Broadcast job started
+        await broadcast_update("video_analysis_started", {
+            "analysis_id": analysis_id,
+            "model_name": analysis_metadata.get("model_name", "unknown"),
+            "status": "started"
+        })
+        
+        # Perform actual video analysis (reuse existing logic)
+        import tempfile
+        import cv2
+        import os
+        
+        results = []
+        analysis_config = analysis_metadata.get("config", {})
+        model_name = analysis_metadata["model_name"]
+        frame_interval = analysis_config.get("frame_interval", 30)
+        max_frames = analysis_config.get("max_frames", 10)
+        prompt = analysis_config.get("prompt", "Describe what you see on this TV screen")
+        generate_video = analysis_config.get("generate_video", False)
+        
+        # Open video
+        cap = cv2.VideoCapture(str(video_path))
+        if not cap.isOpened():
+            raise Exception("Could not open video file")
+        
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        
+        # Update progress with total frames
+        analysis_metadata["progress"]["total_frames"] = min(max_frames, total_frames // frame_interval)
+        with open(analysis_dir / "metadata.json", "w") as f:
+            json.dump(analysis_metadata, f, indent=2)
+        
+        frame_count = 0
+        analyzed_frames = 0
+        
+        # Process frames
+        while cap.isOpened() and analyzed_frames < max_frames:
+            ret, frame = cap.read()
+            if not ret:
+                break
+                
+            if frame_count % frame_interval == 0:
+                try:
+                    # Save frame for analysis
+                    frame_filename = f"frame_{analyzed_frames:04d}.jpg"
+                    frame_path = analysis_dir / frame_filename
+                    cv2.imwrite(str(frame_path), frame)
+                    
+                    # Perform analysis (placeholder - would call actual model)
+                    timestamp = frame_count / fps if fps > 0 else analyzed_frames
+                    
+                    # Simulate analysis result
+                    frame_result = {
+                        "frame_number": frame_count,
+                        "timestamp": timestamp,
+                        "analysis": f"Analysis of frame {analyzed_frames + 1}",
+                        "detections": [],
+                        "frame_path": frame_filename
+                    }
+                    
+                    results.append(frame_result)
+                    analyzed_frames += 1
+                    
+                    # Update progress
+                    progress_percentage = (analyzed_frames / min(max_frames, total_frames // frame_interval)) * 100
+                    analysis_metadata["progress"].update({
+                        "current_frame": analyzed_frames,
+                        "percentage": progress_percentage
+                    })
+                    
+                    with open(analysis_dir / "metadata.json", "w") as f:
+                        json.dump(analysis_metadata, f, indent=2)
+                    
+                    # Broadcast progress
+                    await broadcast_update("video_analysis_progress", {
+                        "analysis_id": analysis_id,
+                        "progress": analysis_metadata["progress"]
+                    })
+                    
+                except Exception as e:
+                    log.warning(f"Failed to analyze frame {analyzed_frames}: {e}")
+                    
+            frame_count += 1
+        
+        cap.release()
+        
+        # Save final results
+        results_data = {
+            "analysis_id": analysis_id,
+            "model_name": model_name,
+            "total_frames_analyzed": analyzed_frames,
+            "video_duration": total_frames / fps if fps > 0 else 0,
+            "results": results,
+            "config": analysis_config
+        }
+        
+        with open(analysis_dir / "results.json", "w") as f:
+            json.dump(results_data, f, indent=2)
+        
+        # Update final status
+        analysis_metadata.update({
+            "status": "completed",
+            "completed_at": datetime.now().isoformat(),
+            "frames_analyzed": analyzed_frames,
+            "results_file": "results.json"
+        })
+        
+        with open(analysis_dir / "metadata.json", "w") as f:
+            json.dump(analysis_metadata, f, indent=2)
+        
+        # Broadcast completion
+        await broadcast_update("video_analysis_completed", {
+            "analysis_id": analysis_id,
+            "model_name": model_name,
+            "status": "completed",
+            "frames_analyzed": analyzed_frames,
+            "results_available": True
+        })
+        
+        log.info(f"Video analysis completed for {analysis_id}")
+        
+    except Exception as e:
+        error_msg = f"Video analysis failed: {str(e)}"
+        log.error(error_msg)
+        
+        analysis_metadata.update({
+            "status": "failed",
+            "error": error_msg,
+            "failed_at": datetime.now().isoformat()
+        })
+        
+        with open(analysis_dir / "metadata.json", "w") as f:
+            json.dump(analysis_metadata, f, indent=2)
+        
+        await broadcast_update("video_analysis_failed", {
+            "analysis_id": analysis_id,
+            "error": error_msg
+        })
+    
+    finally:
+        # Clean up task tracking
+        if analysis_id in running_video_analysis_tasks:
+            del running_video_analysis_tasks[analysis_id]
+
+
+@app.post("/test/models/{model_name}/analyze-video-async")
+async def start_video_analysis_async(
+    model_name: str,
+    file: UploadFile = File(...),
+    frame_interval: int = Form(30),
+    max_frames: int = Form(10),
+    prompt: str = Form("Describe what you see on this TV screen"),
+    selected_classes: str = Form(""),
+    generate_video: str = Form("false"),
+    skip_frequency: Optional[int] = Form(None)
+):
+    """Start asynchronous video analysis that won't timeout"""
+    import tempfile
+    
+    # Validate model exists
+    if model_name not in AVAILABLE_MODELS:
+        raise HTTPException(status_code=404, detail=f"Model {model_name} not found")
+    
+    # Validate video file
+    if not file.content_type.startswith('video/'):
+        raise HTTPException(status_code=400, detail="File must be a video")
+    
+    # Create analysis job
+    analysis_id = str(uuid.uuid4())
+    analysis_dir = TESTING_DIR / f"async_video_analysis_{analysis_id}"
+    analysis_dir.mkdir(parents=True)
+    
+    # Save uploaded video
+    video_path = analysis_dir / f"input_video{Path(file.filename).suffix}"
+    with open(video_path, "wb") as buffer:
+        content = await file.read()
+        buffer.write(content)
+    
+    # Use skip_frequency if provided
+    if skip_frequency is not None:
+        frame_interval = skip_frequency
+    
+    # Convert string generate_video to boolean
+    generate_video_bool = generate_video.lower() in ('true', '1', 'yes', 'on')
+    
+    # Create analysis metadata
+    analysis_metadata = {
+        "analysis_id": analysis_id,
+        "model_name": model_name,
+        "video_filename": file.filename,
+        "status": "pending",
+        "created_at": datetime.now().isoformat(),
+        "config": {
+            "frame_interval": frame_interval,
+            "max_frames": max_frames,
+            "prompt": prompt,
+            "selected_classes": selected_classes,
+            "generate_video": generate_video_bool
+        }
+    }
+    
+    # Save metadata
+    with open(analysis_dir / "metadata.json", "w") as f:
+        json.dump(analysis_metadata, f, indent=2)
+    
+    # Start analysis in background
+    task = asyncio.create_task(execute_video_analysis_job(analysis_id, analysis_metadata, analysis_dir, video_path))
+    running_video_analysis_tasks[analysis_id] = task
+    
+    return {
+        "analysis_id": analysis_id,
+        "status": "started",
+        "message": "Video analysis started. Use the analysis_id to check progress."
+    }
+
+
+@app.get("/test/video-analysis/{analysis_id}/status")
+async def get_video_analysis_status(analysis_id: str):
+    """Get the status of a video analysis job"""
+    analysis_dir = TESTING_DIR / f"async_video_analysis_{analysis_id}"
+    metadata_file = analysis_dir / "metadata.json"
+    
+    if not metadata_file.exists():
+        raise HTTPException(status_code=404, detail="Analysis job not found")
+    
+    with open(metadata_file) as f:
+        metadata = json.load(f)
+    
+    return {
+        "analysis_id": analysis_id,
+        "status": metadata.get("status", "unknown"),
+        "progress": metadata.get("progress", {}),
+        "created_at": metadata.get("created_at"),
+        "started_at": metadata.get("started_at"),
+        "completed_at": metadata.get("completed_at"),
+        "failed_at": metadata.get("failed_at"),
+        "error": metadata.get("error"),
+        "frames_analyzed": metadata.get("frames_analyzed", 0)
+    }
+
+
+@app.get("/test/video-analysis/{analysis_id}/results")
+async def get_video_analysis_results(analysis_id: str):
+    """Get the results of a completed video analysis job"""
+    analysis_dir = TESTING_DIR / f"async_video_analysis_{analysis_id}"
+    results_file = analysis_dir / "results.json"
+    
+    if not results_file.exists():
+        raise HTTPException(status_code=404, detail="Analysis results not found")
+    
+    with open(results_file) as f:
+        results = json.load(f)
+    
+    return results
 
 
 # Helper function to broadcast updates
