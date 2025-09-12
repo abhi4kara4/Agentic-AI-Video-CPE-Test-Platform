@@ -2929,7 +2929,7 @@ async def execute_training_job(job_name: str, job_metadata: dict, job_dir: Path)
 # Additional training endpoints for frontend compatibility
 @app.get("/models/list")
 async def list_models_alias():
-    """List trained models to match frontend expectations"""
+    """List trained models to match frontend expectations, including PaddleOCR models"""
     models_dir = TRAINING_DIR / "models"
     models_dir.mkdir(exist_ok=True)
     
@@ -2937,6 +2937,7 @@ async def list_models_alias():
     models = []
     
     try:
+        # First, scan regular trained models
         for model_dir in models_dir.iterdir():
             if model_dir.is_dir():
                 log.debug(f"Found model directory: {model_dir.name}")
@@ -3011,12 +3012,200 @@ async def list_models_alias():
                 else:
                     log.debug(f"No metadata.json found in {model_dir.name}")
         
-        log.info(f"Found {len(models)} trained models")
+        # Add PaddleOCR models from Archive directory
+        try:
+            archive_models = await get_paddleocr_models_from_archive()
+            models.extend(archive_models)
+            log.info(f"Added {len(archive_models)} PaddleOCR models from Archive")
+        except Exception as e:
+            log.warning(f"Failed to load Archive PaddleOCR models: {e}")
+        
+        # Add trained PaddleOCR models from volume mount
+        try:
+            trained_paddleocr_models = await get_trained_paddleocr_models()
+            models.extend(trained_paddleocr_models)
+            log.info(f"Added {len(trained_paddleocr_models)} trained PaddleOCR models")
+        except Exception as e:
+            log.warning(f"Failed to load trained PaddleOCR models: {e}")
+        
+        log.info(f"Found {len(models)} total models")
         return {"models": models}
         
     except Exception as e:
         log.error(f"Error listing models: {e}")
         return {"models": []}
+
+
+async def get_paddleocr_models_from_archive() -> List[Dict[str, Any]]:
+    """Load PaddleOCR models from Archive directory"""
+    models = []
+    try:
+        # Load manifest from Archive directory
+        manifest_path = Path("Archive/paddleocr_models/manifest.json")
+        if not manifest_path.exists():
+            log.warning(f"PaddleOCR manifest not found at {manifest_path}")
+            return models
+        
+        with open(manifest_path, 'r') as f:
+            manifest = json.load(f)
+        
+        # Process each model type and language
+        for train_type, languages in manifest.get("models", {}).items():
+            for language, model_list in languages.items():
+                for model_info in model_list:
+                    # Create friendly model names
+                    model_name = f"PaddleOCR {language.upper()} {train_type.upper()}"
+                    if "v4" in model_info.get("filename", ""):
+                        model_name += " v4"
+                    elif "v3" in model_info.get("filename", ""):
+                        model_name += " v3"
+                    else:
+                        model_name += " v2"
+                    
+                    # Check if model file exists
+                    model_path = Path(f"Archive/paddleocr_models/{model_info['path']}")
+                    model_status = "ready" if model_path.exists() else "missing"
+                    
+                    model_entry = {
+                        "name": model_name,
+                        "type": "paddleocr",
+                        "baseModel": f"{language}_{train_type}_model",
+                        "createdAt": "2024-01-01T00:00:00Z",  # Default timestamp for pre-trained models
+                        "metrics": {},
+                        "status": model_status,
+                        "original_status": model_status,
+                        "dataset_name": f"paddleocr_{language}_{train_type}",
+                        "training_results": {},
+                        "weights_info": {"model_path": str(model_path)} if model_path.exists() else {},
+                        "paddleocr_info": {
+                            "language": language,
+                            "train_type": train_type,
+                            "filename": model_info["filename"],
+                            "size": model_info.get("size", 0),
+                            "source": "archive"
+                        }
+                    }
+                    
+                    models.append(model_entry)
+                    log.debug(f"Added Archive PaddleOCR model: {model_name}")
+        
+        return models
+        
+    except Exception as e:
+        log.error(f"Error loading PaddleOCR models from Archive: {e}")
+        return []
+
+
+async def get_trained_paddleocr_models() -> List[Dict[str, Any]]:
+    """Load trained PaddleOCR models from volume mount directory"""
+    models = []
+    try:
+        # Check both local and volume mount directories
+        base_dirs = [
+            Path("trained_models/paddleocr"),
+            Path("/app/volumes/trained_models/paddleocr")
+        ]
+        
+        for base_dir in base_dirs:
+            if not base_dir.exists():
+                continue
+                
+            # Load trained models manifest if exists
+            manifest_path = base_dir / "manifest.json"
+            if manifest_path.exists():
+                with open(manifest_path, 'r') as f:
+                    manifest = json.load(f)
+                
+                # Process trained models from manifest
+                for train_type, languages in manifest.get("models", {}).items():
+                    for language, model_list in languages.items():
+                        for model_info in model_list:
+                            if not model_info.get("custom_trained", False):
+                                continue  # Skip non-custom trained models
+                                
+                            # Create model name from filename
+                            filename = model_info["filename"]
+                            model_name = filename.replace("_infer.tar", "").replace("_", " ").title()
+                            
+                            # Check if model file exists
+                            model_path = base_dir / model_info["path"]
+                            model_status = "ready" if model_path.exists() else "missing"
+                            
+                            model_entry = {
+                                "name": model_name,
+                                "type": "paddleocr", 
+                                "baseModel": f"custom_{language}_{train_type}",
+                                "createdAt": model_info.get("trained_at", "2024-01-01T00:00:00Z"),
+                                "metrics": {},
+                                "status": model_status,
+                                "original_status": model_status,
+                                "dataset_name": f"custom_paddleocr_{language}_{train_type}",
+                                "training_results": {},
+                                "weights_info": {"model_path": str(model_path)} if model_path.exists() else {},
+                                "paddleocr_info": {
+                                    "language": language,
+                                    "train_type": train_type,
+                                    "filename": filename,
+                                    "size": model_info.get("size", 0),
+                                    "source": "trained",
+                                    "trained_at": model_info.get("trained_at"),
+                                    "download_path": f"/models/trained/{filename}/download"
+                                }
+                            }
+                            
+                            models.append(model_entry)
+                            log.debug(f"Added trained PaddleOCR model: {model_name}")
+            
+            # Also scan directory structure for tar files not in manifest
+            try:
+                for train_type_dir in base_dir.iterdir():
+                    if not train_type_dir.is_dir() or train_type_dir.name not in ["det", "rec", "cls"]:
+                        continue
+                        
+                    for lang_dir in train_type_dir.iterdir():
+                        if not lang_dir.is_dir():
+                            continue
+                            
+                        for model_file in lang_dir.glob("*.tar"):
+                            # Skip if already in manifest
+                            filename = model_file.name
+                            if any(m["paddleocr_info"]["filename"] == filename for m in models):
+                                continue
+                                
+                            model_name = filename.replace("_infer.tar", "").replace("_", " ").title()
+                            
+                            model_entry = {
+                                "name": model_name,
+                                "type": "paddleocr",
+                                "baseModel": f"custom_{lang_dir.name}_{train_type_dir.name}",
+                                "createdAt": datetime.fromtimestamp(model_file.stat().st_mtime).isoformat(),
+                                "metrics": {},
+                                "status": "ready",
+                                "original_status": "ready", 
+                                "dataset_name": f"custom_paddleocr_{lang_dir.name}_{train_type_dir.name}",
+                                "training_results": {},
+                                "weights_info": {"model_path": str(model_file)},
+                                "paddleocr_info": {
+                                    "language": lang_dir.name,
+                                    "train_type": train_type_dir.name,
+                                    "filename": filename,
+                                    "size": model_file.stat().st_size,
+                                    "source": "trained_direct",
+                                    "download_path": f"/models/trained/{filename}/download"
+                                }
+                            }
+                            
+                            models.append(model_entry)
+                            log.debug(f"Added direct trained PaddleOCR model: {model_name}")
+                            
+            except Exception as e:
+                log.warning(f"Error scanning trained models directory {base_dir}: {e}")
+        
+        return models
+        
+    except Exception as e:
+        log.error(f"Error loading trained PaddleOCR models: {e}")
+        return []
 
 
 def get_plot_type(filename: str) -> dict:
@@ -3613,6 +3802,222 @@ async def debug_model_structure(model_name: str):
         "all_models": all_models,
         "structure": structure
     }
+
+
+@app.post("/models/paddleocr/download-cdn")
+async def download_paddleocr_model_from_cdn(request: dict):
+    """Download PaddleOCR model from CDN URL"""
+    try:
+        cdn_url = request.get("cdn_url")
+        language = request.get("language", "en")
+        train_type = request.get("train_type", "det")
+        
+        if not cdn_url:
+            raise HTTPException(status_code=400, detail="CDN URL is required")
+        
+        # Create models directory for the language and type
+        models_dir = Path("models/paddleocr") / train_type / language
+        models_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Download the model file
+        import aiohttp
+        import aiofiles
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(cdn_url) as response:
+                if response.status != 200:
+                    raise HTTPException(status_code=400, detail=f"Failed to download model from CDN: {response.status}")
+                
+                # Extract filename from URL or use default
+                filename = cdn_url.split("/")[-1] or f"{language}_{train_type}_model.tar"
+                file_path = models_dir / filename
+                
+                async with aiofiles.open(file_path, 'wb') as f:
+                    async for chunk in response.content.iter_chunked(8192):
+                        await f.write(chunk)
+        
+        # Extract if it's an archive
+        if filename.endswith(('.tar', '.tar.gz', '.zip')):
+            extract_dir = models_dir / filename.stem
+            extract_dir.mkdir(exist_ok=True)
+            
+            if filename.endswith('.zip'):
+                import zipfile
+                with zipfile.ZipFile(file_path, 'r') as zip_ref:
+                    zip_ref.extractall(extract_dir)
+            else:
+                import tarfile
+                with tarfile.open(file_path, 'r:*') as tar_ref:
+                    tar_ref.extractall(extract_dir)
+            
+            model_path = str(extract_dir)
+        else:
+            model_path = str(file_path)
+        
+        log.info(f"Downloaded PaddleOCR model from CDN: {cdn_url} -> {model_path}")
+        
+        return {
+            "status": "success",
+            "message": "Model downloaded successfully",
+            "model_path": model_path,
+            "language": language,
+            "train_type": train_type
+        }
+        
+    except Exception as e:
+        log.error(f"Failed to download model from CDN: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to download model: {str(e)}")
+
+
+@app.post("/models/paddleocr/upload")
+async def upload_paddleocr_model(
+    model_file: UploadFile = File(...),
+    language: str = Form("en"),
+    train_type: str = Form("det")
+):
+    """Upload PaddleOCR model file"""
+    try:
+        # Create models directory for the language and type
+        models_dir = Path("models/paddleocr") / train_type / language
+        models_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save uploaded file
+        file_path = models_dir / model_file.filename
+        with open(file_path, "wb") as f:
+            content = await model_file.read()
+            f.write(content)
+        
+        # Extract if it's an archive
+        if model_file.filename.endswith(('.tar', '.tar.gz', '.zip')):
+            extract_dir = models_dir / Path(model_file.filename).stem
+            extract_dir.mkdir(exist_ok=True)
+            
+            if model_file.filename.endswith('.zip'):
+                import zipfile
+                with zipfile.ZipFile(file_path, 'r') as zip_ref:
+                    zip_ref.extractall(extract_dir)
+            else:
+                import tarfile
+                with tarfile.open(file_path, 'r:*') as tar_ref:
+                    tar_ref.extractall(extract_dir)
+            
+            model_path = str(extract_dir)
+        else:
+            model_path = str(file_path)
+        
+        log.info(f"Uploaded PaddleOCR model: {model_file.filename} -> {model_path}")
+        
+        return {
+            "status": "success",
+            "message": "Model uploaded successfully",
+            "model_path": model_path,
+            "language": language,
+            "train_type": train_type,
+            "filename": model_file.filename
+        }
+        
+    except Exception as e:
+        log.error(f"Failed to upload model: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to upload model: {str(e)}")
+
+
+@app.get("/models/trained")
+async def list_trained_models():
+    """List all trained models available for download"""
+    try:
+        trained_models = []
+        
+        # Check both local and volume mount locations
+        search_paths = [
+            Path('trained_models'),
+            Path('/app/volumes/trained_models')
+        ]
+        
+        for base_path in search_paths:
+            if not base_path.exists():
+                continue
+                
+            # Look for PaddleOCR models
+            paddleocr_path = base_path / 'paddleocr'
+            if paddleocr_path.exists():
+                for train_type in ['det', 'rec', 'cls']:
+                    type_path = paddleocr_path / train_type
+                    if type_path.exists():
+                        for lang_dir in type_path.iterdir():
+                            if lang_dir.is_dir():
+                                language = lang_dir.name
+                                for model_file in lang_dir.glob('*.tar'):
+                                    model_info = {
+                                        'name': model_file.stem,
+                                        'filename': model_file.name,
+                                        'path': str(model_file),
+                                        'type': 'paddleocr',
+                                        'train_type': train_type,
+                                        'language': language,
+                                        'size': model_file.stat().st_size,
+                                        'created_at': datetime.fromtimestamp(model_file.stat().st_ctime).isoformat(),
+                                        'downloadable': True
+                                    }
+                                    trained_models.append(model_info)
+        
+        # Remove duplicates based on filename
+        unique_models = {}
+        for model in trained_models:
+            key = f"{model['filename']}_{model['language']}_{model['train_type']}"
+            if key not in unique_models:
+                unique_models[key] = model
+        
+        return {
+            "status": "success",
+            "models": list(unique_models.values()),
+            "count": len(unique_models)
+        }
+        
+    except Exception as e:
+        log.error(f"Failed to list trained models: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to list trained models: {str(e)}")
+
+
+@app.get("/models/trained/{model_filename}/download")
+async def download_trained_model(model_filename: str):
+    """Download a trained model file"""
+    try:
+        # Search for the model file in known locations
+        search_paths = [
+            Path('trained_models'),
+            Path('/app/volumes/trained_models')
+        ]
+        
+        model_path = None
+        for base_path in search_paths:
+            if not base_path.exists():
+                continue
+            
+            # Search recursively for the model file
+            for model_file in base_path.rglob(model_filename):
+                if model_file.is_file():
+                    model_path = model_file
+                    break
+            
+            if model_path:
+                break
+        
+        if not model_path or not model_path.exists():
+            raise HTTPException(status_code=404, detail="Trained model not found")
+        
+        # Return file for download
+        from fastapi.responses import FileResponse
+        return FileResponse(
+            path=str(model_path),
+            filename=model_filename,
+            media_type='application/octet-stream'
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Failed to download trained model: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to download model: {str(e)}")
 
 
 @app.post("/training/start")

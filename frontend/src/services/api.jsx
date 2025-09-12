@@ -168,6 +168,28 @@ export const trainingAPI = {
   exportModel: (modelName, format = 'pytorch') => 
     apiClient.get(`/models/${modelName}/export/${format}`, { responseType: 'blob' }),
   
+  // PaddleOCR model operations
+  downloadModelFromCDN: (cdnUrl, language, trainType) => 
+    apiClient.post('/models/paddleocr/download-cdn', { 
+      cdn_url: cdnUrl, 
+      language: language, 
+      train_type: trainType 
+    }),
+  uploadModelFile: (file, language, trainType) => {
+    const formData = new FormData();
+    formData.append('model_file', file);
+    formData.append('language', language);
+    formData.append('train_type', trainType);
+    return apiClient.post('/models/paddleocr/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+  },
+  
+  // Trained models management  
+  listTrainedModels: () => apiClient.get('/models/trained'),
+  downloadTrainedModel: (filename) => 
+    apiClient.get(`/models/trained/${filename}/download`, { responseType: 'blob' }),
+  
   // Model evaluation
   evaluateModel: (modelName, datasetId) => 
     apiClient.post('/training/evaluate', { 

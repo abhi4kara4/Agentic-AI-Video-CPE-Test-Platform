@@ -39,6 +39,7 @@ import {
   Menu,
   Divider,
 } from '@mui/material';
+import { useNavigate } from 'react-router-dom';
 import {
   ModelTraining as TrainingIcon,
   PlayArrow as StartIcon,
@@ -54,6 +55,7 @@ import {
   Assessment as TestIcon,
   Timeline as TimelineIcon,
   Assessment as AssessmentIcon,
+  Upload as UploadIcon,
 } from '@mui/icons-material';
 import { trainingAPI, datasetAPI, wsManager } from '../services/api.jsx';
 import { DATASET_TYPES, DATASET_TYPE_INFO } from '../constants/datasetTypes.js';
@@ -274,10 +276,12 @@ const TrainingProgressCharts = ({ job }) => {
 };
 
 const ModelTraining = ({ onNotification }) => {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState(0);
   const [datasets, setDatasets] = useState([]);
   const [trainingJobs, setTrainingJobs] = useState([]);
   const [models, setModels] = useState([]);
+  const [trainedModels, setTrainedModels] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedDataset, setSelectedDataset] = useState('');
   const [trainingConfig, setTrainingConfig] = useState({
@@ -296,7 +300,11 @@ const ModelTraining = ({ onNotification }) => {
     useCustomModel: false,
     customDetectionModelPath: '',
     customRecognitionModelPath: '',
-    customClassificationModelPath: ''
+    customClassificationModelPath: '',
+    // Model source options
+    modelSource: 'existing', // 'existing', 'cdn', 'upload'
+    cdnUrl: '',
+    uploadedModelFile: null
   });
   const [startTrainingDialog, setStartTrainingDialog] = useState(false);
   const [isStartingTraining, setIsStartingTraining] = useState(false);
@@ -323,6 +331,7 @@ const ModelTraining = ({ onNotification }) => {
     loadDatasets();
     loadTrainingJobs();
     loadModels();
+    loadTrainedModels();
 
     // Set up WebSocket listeners for training updates
     const handleTrainingStarted = (data) => {
@@ -444,6 +453,44 @@ const ModelTraining = ({ onNotification }) => {
     }
   };
 
+  const loadTrainedModels = async () => {
+    try {
+      const response = await trainingAPI.listTrainedModels();
+      setTrainedModels(response.data?.models || []);
+    } catch (error) {
+      console.error('Failed to load trained models:', error);
+      setTrainedModels([]);
+    }
+  };
+
+  const handleDownloadTrainedModel = async (model) => {
+    try {
+      const response = await trainingAPI.downloadTrainedModel(model.filename);
+      
+      // Create download link
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', model.filename);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      
+      onNotification({
+        type: 'success',
+        title: 'Model Downloaded',
+        message: `${model.filename} has been downloaded successfully`
+      });
+    } catch (error) {
+      console.error('Failed to download model:', error);
+      onNotification({
+        type: 'error',
+        title: 'Download Failed', 
+        message: 'Failed to download the trained model'
+      });
+    }
+  };
 
   const handleStartTraining = async () => {
     if (!selectedDataset || !trainingConfig.modelName) {
@@ -665,82 +712,12 @@ const ModelTraining = ({ onNotification }) => {
 
   const getPaddleOCRModels = (language, trainType) => {
     const models = [];
-    
-    // Add your existing models based on the archive structure
-    const existingModelsBasePath = '../Archive/paddleocr_models';
-    
-    // Add existing models from your archive first
-    switch (trainType) {
-      case 'det':
-        if (language === 'en') {
-          models.push(
-            { value: `${existingModelsBasePath}/det/en/en_PP-OCRv3_det_infer.tar`, label: 'Your English Detection Model (PP-OCRv3)' },
-            { value: `${existingModelsBasePath}/det/en/Multilingual_PP-OCRv3_det_infer.tar`, label: 'Your Multilingual Detection Model' }
-          );
-        } else if (language === 'de') {
-          models.push(
-            { value: `${existingModelsBasePath}/det/de/Multilingual_PP-OCRv3_det_infer.tar`, label: 'Your German Detection Model (Multilingual)' }
-          );
-        } else if (language === 'es') {
-          models.push(
-            { value: `${existingModelsBasePath}/det/es/Multilingual_PP-OCRv3_det_infer.tar`, label: 'Your Spanish Detection Model (Multilingual)' }
-          );
-        } else if (language === 'fr') {
-          models.push(
-            { value: `${existingModelsBasePath}/det/fr/Multilingual_PP-OCRv3_det_infer.tar`, label: 'Your French Detection Model (Multilingual)' }
-          );
-        } else if (language === 'it') {
-          models.push(
-            { value: `${existingModelsBasePath}/det/it/Multilingual_PP-OCRv3_det_infer.tar`, label: 'Your Italian Detection Model (Multilingual)' }
-          );
-        } else if (language === 'ch') {
-          models.push(
-            { value: `${existingModelsBasePath}/det/ch/ch_PP-OCRv3_det_infer.tar`, label: 'Your Chinese Detection Model (PP-OCRv3)' }
-          );
-        }
-        break;
-        
-      case 'rec':
-        if (language === 'en') {
-          models.push(
-            { value: `${existingModelsBasePath}/rec/en/en_PP-OCRv4_rec_infer.tar`, label: 'Your English Recognition Model (PP-OCRv4)' }
-          );
-        } else if (language === 'de') {
-          models.push(
-            { value: `${existingModelsBasePath}/rec/de/german_mobile_v2.0_rec_infer.tar`, label: 'Your German Recognition Model (Mobile v2.0)' }
-          );
-        } else if (language === 'es') {
-          models.push(
-            { value: `${existingModelsBasePath}/rec/es/en_PP-OCRv4_rec_infer.tar`, label: 'Your Spanish Recognition Model (PP-OCRv4)' }
-          );
-        } else if (language === 'fr') {
-          models.push(
-            { value: `${existingModelsBasePath}/rec/fr/french_mobile_v2.0_rec_infer.tar`, label: 'Your French Recognition Model (Mobile v2.0)' }
-          );
-        } else if (language === 'it') {
-          models.push(
-            { value: `${existingModelsBasePath}/rec/it/french_mobile_v2.0_rec_infer.tar`, label: 'Your Italian Recognition Model (French Mobile)' }
-          );
-        } else if (language === 'ch') {
-          models.push(
-            { value: `${existingModelsBasePath}/rec/ch/ch_PP-OCRv4_rec_infer.tar`, label: 'Your Chinese Recognition Model (PP-OCRv4)' }
-          );
-        }
-        break;
-        
-      case 'cls':
-        // Classification models are available for all your languages
-        models.push(
-          { value: `${existingModelsBasePath}/cls/${language}/ch_ppocr_mobile_v2.0_cls_infer.tar`, label: `Your ${language.toUpperCase()} Classification Model (Mobile v2.0)` }
-        );
-        break;
-    }
-    
-    // Add custom path option
-    models.push({ value: 'custom', label: 'Use Custom Model Path (Fine-tune other models)' });
-    
-    // Add fallback standard models
     const langPrefix = language === 'en' ? 'en' : language === 'ch' ? 'ch' : language;
+    
+    // Add option to use existing/CDN/uploaded models
+    models.push({ value: 'production_model', label: 'Use Production Model (CDN/Upload)' });
+    
+    // Add fallback standard models for development/testing
     switch (trainType) {
       case 'det':
         models.push(
@@ -1113,46 +1090,109 @@ const ModelTraining = ({ onNotification }) => {
       {activeTab === 2 && (
         <Card>
           <CardContent>
-            <Typography variant="h6" gutterBottom>
-              Trained Models
-            </Typography>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+              <Typography variant="h6">
+                Production-Ready Trained Models
+              </Typography>
+              <Button
+                startIcon={<RefreshIcon />}
+                onClick={loadTrainedModels}
+                variant="outlined"
+                size="small"
+              >
+                Refresh
+              </Button>
+            </Box>
             
-            {models.length === 0 ? (
+            {trainedModels.length === 0 ? (
               <Alert severity="info">
-                No trained models found. Complete training jobs will appear here.
+                No trained models found. Complete training jobs to see models here.
+                <br />
+                Trained models are automatically saved to volume mounts for easy download.
               </Alert>
             ) : (
-              <List>
-                {models.map((model) => (
-                  <ListItem key={model.name}>
-                    <ListItemText
-                      primary={model.name}
-                      secondary={`Type: ${model.type} • Created: ${new Date(model.createdAt).toLocaleString()}`}
-                    />
-                    <ListItemSecondaryAction>
-                      <IconButton 
-                        onClick={(e) => handleDownloadMenuOpen(e, model.name)}
-                        title="Download Model"
-                      >
-                        <DownloadIcon />
-                      </IconButton>
-                      <IconButton 
-                        onClick={() => handleViewModelDetails(model)}
-                        title="View Model Details"
-                      >
-                        <ViewIcon />
-                      </IconButton>
-                      <IconButton 
-                        onClick={() => handleDeleteModel(model.name)} 
-                        color="error"
-                        title="Delete Model"
-                      >
-                        <DeleteIcon />
-                      </IconButton>
-                    </ListItemSecondaryAction>
-                  </ListItem>
-                ))}
-              </List>
+              <>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  Found {trainedModels.length} trained models ready for production deployment.
+                </Typography>
+                <Grid container spacing={2}>
+                  {trainedModels.map((model, index) => (
+                    <Grid item xs={12} sm={6} md={4} key={index}>
+                      <Card variant="outlined" sx={{ height: '100%' }}>
+                        <CardContent>
+                          <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+                            <Box sx={{ flex: 1 }}>
+                              <Typography variant="h6" gutterBottom noWrap>
+                                {model.name}
+                              </Typography>
+                              <Box sx={{ display: 'flex', gap: 1, mb: 1, flexWrap: 'wrap' }}>
+                                <Chip 
+                                  label={model.train_type?.toUpperCase() || 'OCR'} 
+                                  size="small" 
+                                  color="primary"
+                                />
+                                <Chip 
+                                  label={model.language?.toUpperCase() || 'EN'} 
+                                  size="small" 
+                                  color="secondary"
+                                />
+                              </Box>
+                              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                                {model.type === 'paddleocr' ? 'PaddleOCR Model' : 'Custom Model'}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary" display="block">
+                                Size: {(model.size / (1024 * 1024)).toFixed(1)} MB
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary" display="block">
+                                Created: {new Date(model.created_at).toLocaleDateString()}
+                              </Typography>
+                            </Box>
+                          </Box>
+                          <Box sx={{ mt: 2, display: 'flex', gap: 1 }}>
+                            <Button
+                              startIcon={<DownloadIcon />}
+                              onClick={() => handleDownloadTrainedModel(model)}
+                              variant="contained"
+                              size="small"
+                              fullWidth
+                            >
+                              Download
+                            </Button>
+                            <Button
+                              startIcon={<TestIcon />}
+                              variant="outlined"
+                              size="small"
+                              onClick={() => {
+                                // Navigate to model testing with this model
+                                navigate('/testing', { 
+                                  state: { 
+                                    selectedModel: {
+                                      name: model.name,
+                                      type: model.type,
+                                      language: model.language,
+                                      trainType: model.train_type,
+                                      filename: model.filename,
+                                      size: model.size,
+                                      createdAt: model.created_at
+                                    }
+                                  } 
+                                });
+                                onNotification({
+                                  type: 'success',
+                                  title: 'Navigating to Model Testing',
+                                  message: `Opening model testing for ${model.name}`
+                                });
+                              }}
+                            >
+                              Test
+                            </Button>
+                          </Box>
+                        </CardContent>
+                      </Card>
+                    </Grid>
+                  ))}
+                </Grid>
+              </>
             )}
           </CardContent>
         </Card>
@@ -1213,51 +1253,68 @@ const ModelTraining = ({ onNotification }) => {
                 </Select>
               </FormControl>
 
-              {/* Custom Model Paths for PaddleOCR */}
+              {/* Production Model Configuration for PaddleOCR */}
               {datasets.find(d => d.id === selectedDataset)?.dataset_type === DATASET_TYPES.PADDLEOCR && 
-               trainingConfig.baseModel === 'custom' && (
-                <Box sx={{ mt: 2, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1, backgroundColor: 'grey.50' }}>
-                  <Typography variant="subtitle2" gutterBottom>
-                    Custom Model Configuration
+               trainingConfig.baseModel === 'production_model' && (
+                <Box sx={{ mt: 2, p: 2, border: '1px solid', borderColor: 'primary.main', borderRadius: 1, backgroundColor: 'primary.50' }}>
+                  <Typography variant="subtitle2" gutterBottom color="primary">
+                    Production Model Configuration
                   </Typography>
                   <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    Provide paths to your existing PaddleOCR model files for fine-tuning. You can use absolute paths or relative paths from the project root.
+                    Load your production PaddleOCR model for fine-tuning with your TV/STB interface data.
                   </Typography>
                   
-                  {trainingConfig.trainType === 'det' && (
+                  {/* Model Source Selection */}
+                  <FormControl fullWidth margin="normal">
+                    <InputLabel>Model Source</InputLabel>
+                    <Select
+                      value={trainingConfig.modelSource}
+                      onChange={(e) => setTrainingConfig({ ...trainingConfig, modelSource: e.target.value })}
+                      label="Model Source"
+                    >
+                      <MenuItem value="cdn">Download from CDN</MenuItem>
+                      <MenuItem value="upload">Upload Model ZIP</MenuItem>
+                    </Select>
+                  </FormControl>
+                  
+                  {/* CDN Download Option */}
+                  {trainingConfig.modelSource === 'cdn' && (
                     <TextField
                       fullWidth
-                      label="Detection Model Path"
-                      value={trainingConfig.customDetectionModelPath}
-                      onChange={(e) => setTrainingConfig({ ...trainingConfig, customDetectionModelPath: e.target.value })}
-                      placeholder="./models/detection/inference.pdmodel (or full directory path)"
+                      label="CDN Model URL"
+                      value={trainingConfig.cdnUrl}
+                      onChange={(e) => setTrainingConfig({ ...trainingConfig, cdnUrl: e.target.value })}
+                      placeholder={`https://your-cdn.com/models/${trainingConfig.trainType}/${trainingConfig.language}/model.tar`}
                       margin="normal"
-                      helperText="Path to your custom detection model directory or .pdmodel file"
+                      helperText={`URL to your ${trainingConfig.trainType} model for ${trainingConfig.language.toUpperCase()}`}
                     />
                   )}
                   
-                  {trainingConfig.trainType === 'rec' && (
-                    <TextField
-                      fullWidth
-                      label="Recognition Model Path"
-                      value={trainingConfig.customRecognitionModelPath}
-                      onChange={(e) => setTrainingConfig({ ...trainingConfig, customRecognitionModelPath: e.target.value })}
-                      placeholder="./models/recognition/inference.pdmodel (or full directory path)"
-                      margin="normal"
-                      helperText="Path to your custom recognition model directory or .pdmodel file"
-                    />
-                  )}
-                  
-                  {trainingConfig.trainType === 'cls' && (
-                    <TextField
-                      fullWidth
-                      label="Classification Model Path"
-                      value={trainingConfig.customClassificationModelPath}
-                      onChange={(e) => setTrainingConfig({ ...trainingConfig, customClassificationModelPath: e.target.value })}
-                      placeholder="./models/classification/inference.pdmodel (or full directory path)"
-                      margin="normal"
-                      helperText="Path to your custom classification model directory or .pdmodel file"
-                    />
+                  {/* Upload Option */}
+                  {trainingConfig.modelSource === 'upload' && (
+                    <Box sx={{ mt: 2 }}>
+                      <input
+                        accept=".zip,.tar,.tar.gz"
+                        style={{ display: 'none' }}
+                        id="model-upload"
+                        type="file"
+                        onChange={(e) => setTrainingConfig({ ...trainingConfig, uploadedModelFile: e.target.files[0] })}
+                      />
+                      <label htmlFor="model-upload">
+                        <Button
+                          variant="outlined"
+                          component="span"
+                          startIcon={<UploadIcon />}
+                          fullWidth
+                          sx={{ mt: 1 }}
+                        >
+                          {trainingConfig.uploadedModelFile ? trainingConfig.uploadedModelFile.name : 'Upload Model ZIP/TAR'}
+                        </Button>
+                      </label>
+                      <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1 }}>
+                        Upload your production model as ZIP or TAR archive
+                      </Typography>
+                    </Box>
                   )}
                 </Box>
               )}

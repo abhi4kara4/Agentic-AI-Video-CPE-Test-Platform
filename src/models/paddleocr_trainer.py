@@ -303,10 +303,16 @@ class PaddleOCRTrainer:
             project_name = config.get('project_name', 'paddleocr_custom')
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             
-            # Create archive directory structure matching your existing format
-            archive_base = Path('Archive/paddleocr_models')
+            # Create archive directory structure in volume mount for download
+            # Save to both local and volume mount for easy access
+            archive_base = Path('trained_models/paddleocr')
             model_type_dir = archive_base / self.train_type / language
             model_type_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Also create in volume mount if it exists
+            volume_base = Path('/app/volumes/trained_models/paddleocr')
+            volume_model_dir = volume_base / self.train_type / language
+            volume_model_dir.mkdir(parents=True, exist_ok=True)
             
             # Create model filename following your naming convention
             model_filename = f"{project_name}_{self.train_type}_{language}_{timestamp}_infer.tar"
@@ -333,8 +339,22 @@ class PaddleOCRTrainer:
                 for file_path in temp_model_dir.iterdir():
                     tar.add(file_path, arcname=file_path.name)
             
+            # Also create in volume mount for download
+            volume_archive_path = volume_model_dir / model_filename
+            try:
+                shutil.copy2(model_archive_path, volume_archive_path)
+                print(f"Model copied to volume mount: {volume_archive_path}")
+            except Exception as e:
+                print(f"Could not copy to volume mount: {e}")
+            
             # Update manifest.json to include the new model
             self.update_manifest(archive_base, language, model_filename, model_archive_path)
+            
+            # Also update volume manifest
+            try:
+                self.update_manifest(volume_base, language, model_filename, volume_archive_path)
+            except Exception as e:
+                print(f"Could not update volume manifest: {e}")
             
             # Clean up temporary files
             shutil.rmtree(temp_model_dir)

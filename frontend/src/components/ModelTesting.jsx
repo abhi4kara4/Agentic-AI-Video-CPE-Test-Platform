@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   Box,
   Typography,
@@ -660,6 +661,7 @@ const ModelPerformanceAnalysis = ({ testResults }) => {
 };
 
 const ModelTesting = ({ onNotification }) => {
+  const location = useLocation();
   const [activeTab, setActiveTab] = useState(0);
   const [models, setModels] = useState([]);
   const [selectedModel, setSelectedModel] = useState('');
@@ -725,6 +727,40 @@ const ModelTesting = ({ onNotification }) => {
     loadTestHistory();
   }, []);
 
+  // Handle model passed from navigation (from ModelTraining component)
+  useEffect(() => {
+    const passedModel = location.state?.selectedModel;
+    if (passedModel && models.length > 0) {
+      // Check if the passed model exists in the loaded models list
+      const modelExists = models.find(m => m.name === passedModel.name);
+      if (modelExists) {
+        handleModelSelect(passedModel.name);
+        
+        // Set appropriate settings for PaddleOCR models
+        if (passedModel.type === 'paddleocr') {
+          setPaddleOCRSettings(prev => ({
+            ...prev,
+            language: passedModel.language || 'en',
+            taskType: passedModel.trainType || 'det'
+          }));
+          setActiveTab(3); // PaddleOCR tab
+        }
+        
+        // Show notification about the selected model
+        if (onNotification) {
+          onNotification({
+            type: 'success',
+            title: 'Model Selected',
+            message: `${passedModel.name} has been selected for testing`
+          });
+        }
+        
+        // Clear the navigation state to prevent re-triggering
+        window.history.replaceState({}, document.title);
+      }
+    }
+  }, [models, location.state]); // Re-run when models are loaded or navigation state changes
+
   const loadModels = async () => {
     try {
       const response = await trainingAPI.listModels();
@@ -765,6 +801,18 @@ const ModelTesting = ({ onNotification }) => {
       setActiveTab(1);
     } else if (model?.type === 'vision_llm') {
       setActiveTab(2);
+    } else if (model?.type === 'paddleocr') {
+      setActiveTab(3);
+      
+      // Set PaddleOCR settings from model info if available
+      if (model.paddleocr_info) {
+        setPaddleOCRSettings(prev => ({
+          ...prev,
+          language: model.paddleocr_info.language || 'en',
+          taskType: model.paddleocr_info.train_type === 'det' ? 'det' : 
+                   model.paddleocr_info.train_type === 'rec' ? 'rec' : 'both'
+        }));
+      }
     }
 
     // Load available classes for object detection models
