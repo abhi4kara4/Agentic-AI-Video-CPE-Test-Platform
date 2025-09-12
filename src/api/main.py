@@ -2653,15 +2653,31 @@ async def execute_training_job(job_name: str, job_metadata: dict, job_dir: Path)
                     json.dump(job_metadata, f, indent=2)
                 
                 # Prepare training configuration
+                base_model = job_metadata.get("base_model", "ch_PP-OCRv4_det")
+                train_type = job_metadata.get("trainType", "det")
+                
+                # Handle custom model paths
+                if base_model == "custom" and "custom_model_paths" in job_metadata:
+                    custom_paths = job_metadata["custom_model_paths"]
+                    if train_type == "det" and custom_paths.get("detection"):
+                        base_model = custom_paths["detection"]
+                    elif train_type == "rec" and custom_paths.get("recognition"):
+                        base_model = custom_paths["recognition"]
+                    elif train_type == "cls" and custom_paths.get("classification"):
+                        base_model = custom_paths["classification"]
+                    else:
+                        log.warning(f"Custom model path not provided for {train_type}, using default")
+                        base_model = f"ch_PP-OCRv4_{train_type}"
+                
                 training_config = {
-                    "base_model": job_metadata.get("base_model", "ch_PP-OCRv4_det"),
+                    "base_model": base_model,
                     "epochs": job_metadata["config"]["epochs"],
                     "batch_size": job_metadata["config"]["batch_size"],
                     "learning_rate": job_metadata["config"]["learning_rate"],
                     "output_dir": str(job_dir),
                     "project_name": job_metadata.get("model_name", "paddleocr_model"),
                     "language": job_metadata.get("language", "en"),
-                    "train_type": job_metadata.get("trainType", "det")
+                    "train_type": train_type
                 }
                 
                 # Progress callback for PaddleOCR training
@@ -2698,10 +2714,65 @@ async def execute_training_job(job_name: str, job_metadata: dict, job_dir: Path)
                         "progress": job_metadata["progress"]
                     })
                 
-                # Start PaddleOCR training
-                dataset_path = job_metadata["dataset_path"]
+                # Generate PaddleOCR training dataset first
+                original_dataset_path = Path(job_metadata["dataset_path"])
+                training_dataset_name = f"{job_metadata['dataset_name']}_training_paddleocr"
+                training_dataset_path = TRAINING_DIR / training_dataset_name
+                
+                # Check if training dataset already exists, if not generate it
+                if not training_dataset_path.exists() or not (training_dataset_path / "paddleocr_config.yml").exists():
+                    log.info(f"Generating PaddleOCR training dataset at {training_dataset_path}")
+                    
+                    # Load original dataset metadata and labeled images
+                    metadata_file = original_dataset_path / "metadata.json"
+                    if not metadata_file.exists():
+                        raise Exception("Original dataset metadata not found")
+                    
+                    with open(metadata_file) as f:
+                        metadata = json.load(f)
+                    
+                    # Get labeled images from original dataset
+                    images_dir = original_dataset_path / "images"
+                    annotations_dir = original_dataset_path / "annotations"
+                    
+                    labeled_images = []
+                    for annotation_file in annotations_dir.glob("*.json"):
+                        try:
+                            with open(annotation_file) as f:
+                                annotation = json.load(f)
+                            
+                            # Find matching image file
+                            image_filename = annotation.get("image_filename")
+                            if image_filename:
+                                image_file = images_dir / image_filename
+                                if image_file.exists():
+                                    labeled_images.append({
+                                        "image_file": image_file,
+                                        "annotation_file": annotation_file,
+                                        "annotation": annotation
+                                    })
+                        except Exception as e:
+                            log.warning(f"Failed to process annotation {annotation_file}: {e}")
+                    
+                    if not labeled_images:
+                        raise Exception("No labeled images found for PaddleOCR training")
+                    
+                    # Split dataset (80% train, 20% val)
+                    import random
+                    random.shuffle(labeled_images)
+                    split_idx = int(len(labeled_images) * 0.8)
+                    train_images = labeled_images[:split_idx]
+                    val_images = labeled_images[split_idx:]
+                    
+                    # Generate PaddleOCR training dataset
+                    training_dataset_path.mkdir(parents=True, exist_ok=True)
+                    await generate_paddleocr_dataset(training_dataset_path, train_images, val_images, True, 2)
+                    
+                    log.info(f"Generated PaddleOCR training dataset with {len(train_images)} train and {len(val_images)} val images")
+                
+                # Start PaddleOCR training with the generated dataset
                 training_results = await train_paddleocr_model(
-                    dataset_path=dataset_path,
+                    dataset_path=str(training_dataset_path),
                     config=training_config,
                     progress_callback=paddleocr_progress_callback
                 )
@@ -3603,6 +3674,14 @@ async def start_training_simplified(request: dict):
         if dataset_type == "paddleocr":
             job_metadata["language"] = request.get("language", "en")
             job_metadata["trainType"] = request.get("trainType", "det")
+            
+            # Add custom model paths if using custom models
+            if base_model == "custom":
+                job_metadata["custom_model_paths"] = {
+                    "detection": request.get("customDetectionModelPath", ""),
+                    "recognition": request.get("customRecognitionModelPath", ""),
+                    "classification": request.get("customClassificationModelPath", "")
+                }
         
         # Save job metadata initially
         with open(job_dir / "metadata.json", "w") as f:

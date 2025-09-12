@@ -292,6 +292,11 @@ const ModelTraining = ({ onNotification }) => {
     // PaddleOCR specific parameters
     language: 'en',
     trainType: 'det', // 'det', 'rec', 'cls'
+    // Custom model paths
+    useCustomModel: false,
+    customDetectionModelPath: '',
+    customRecognitionModelPath: '',
+    customClassificationModelPath: ''
   });
   const [startTrainingDialog, setStartTrainingDialog] = useState(false);
   const [isStartingTraining, setIsStartingTraining] = useState(false);
@@ -660,24 +665,98 @@ const ModelTraining = ({ onNotification }) => {
 
   const getPaddleOCRModels = (language, trainType) => {
     const models = [];
-    const langPrefix = language === 'en' ? 'en' : language === 'ch' ? 'ch' : language;
     
+    // Add your existing models based on the archive structure
+    const existingModelsBasePath = '../Archive/paddleocr_models';
+    
+    // Add existing models from your archive first
+    switch (trainType) {
+      case 'det':
+        if (language === 'en') {
+          models.push(
+            { value: `${existingModelsBasePath}/det/en/en_PP-OCRv3_det_infer.tar`, label: 'Your English Detection Model (PP-OCRv3)' },
+            { value: `${existingModelsBasePath}/det/en/Multilingual_PP-OCRv3_det_infer.tar`, label: 'Your Multilingual Detection Model' }
+          );
+        } else if (language === 'de') {
+          models.push(
+            { value: `${existingModelsBasePath}/det/de/Multilingual_PP-OCRv3_det_infer.tar`, label: 'Your German Detection Model (Multilingual)' }
+          );
+        } else if (language === 'es') {
+          models.push(
+            { value: `${existingModelsBasePath}/det/es/Multilingual_PP-OCRv3_det_infer.tar`, label: 'Your Spanish Detection Model (Multilingual)' }
+          );
+        } else if (language === 'fr') {
+          models.push(
+            { value: `${existingModelsBasePath}/det/fr/Multilingual_PP-OCRv3_det_infer.tar`, label: 'Your French Detection Model (Multilingual)' }
+          );
+        } else if (language === 'it') {
+          models.push(
+            { value: `${existingModelsBasePath}/det/it/Multilingual_PP-OCRv3_det_infer.tar`, label: 'Your Italian Detection Model (Multilingual)' }
+          );
+        } else if (language === 'ch') {
+          models.push(
+            { value: `${existingModelsBasePath}/det/ch/ch_PP-OCRv3_det_infer.tar`, label: 'Your Chinese Detection Model (PP-OCRv3)' }
+          );
+        }
+        break;
+        
+      case 'rec':
+        if (language === 'en') {
+          models.push(
+            { value: `${existingModelsBasePath}/rec/en/en_PP-OCRv4_rec_infer.tar`, label: 'Your English Recognition Model (PP-OCRv4)' }
+          );
+        } else if (language === 'de') {
+          models.push(
+            { value: `${existingModelsBasePath}/rec/de/german_mobile_v2.0_rec_infer.tar`, label: 'Your German Recognition Model (Mobile v2.0)' }
+          );
+        } else if (language === 'es') {
+          models.push(
+            { value: `${existingModelsBasePath}/rec/es/en_PP-OCRv4_rec_infer.tar`, label: 'Your Spanish Recognition Model (PP-OCRv4)' }
+          );
+        } else if (language === 'fr') {
+          models.push(
+            { value: `${existingModelsBasePath}/rec/fr/french_mobile_v2.0_rec_infer.tar`, label: 'Your French Recognition Model (Mobile v2.0)' }
+          );
+        } else if (language === 'it') {
+          models.push(
+            { value: `${existingModelsBasePath}/rec/it/french_mobile_v2.0_rec_infer.tar`, label: 'Your Italian Recognition Model (French Mobile)' }
+          );
+        } else if (language === 'ch') {
+          models.push(
+            { value: `${existingModelsBasePath}/rec/ch/ch_PP-OCRv4_rec_infer.tar`, label: 'Your Chinese Recognition Model (PP-OCRv4)' }
+          );
+        }
+        break;
+        
+      case 'cls':
+        // Classification models are available for all your languages
+        models.push(
+          { value: `${existingModelsBasePath}/cls/${language}/ch_ppocr_mobile_v2.0_cls_infer.tar`, label: `Your ${language.toUpperCase()} Classification Model (Mobile v2.0)` }
+        );
+        break;
+    }
+    
+    // Add custom path option
+    models.push({ value: 'custom', label: 'Use Custom Model Path (Fine-tune other models)' });
+    
+    // Add fallback standard models
+    const langPrefix = language === 'en' ? 'en' : language === 'ch' ? 'ch' : language;
     switch (trainType) {
       case 'det':
         models.push(
-          { value: `${langPrefix}_PP-OCRv4_det`, label: `PaddleOCR v4 Detection (${language.toUpperCase()})` },
-          { value: `${langPrefix}_PP-OCRv3_det`, label: `PaddleOCR v3 Detection (${language.toUpperCase()})` }
+          { value: `${langPrefix}_PP-OCRv4_det`, label: `Standard PaddleOCR v4 Detection (${language.toUpperCase()})` },
+          { value: `${langPrefix}_PP-OCRv3_det`, label: `Standard PaddleOCR v3 Detection (${language.toUpperCase()})` }
         );
         break;
       case 'rec':
         models.push(
-          { value: `${langPrefix}_PP-OCRv4_rec`, label: `PaddleOCR v4 Recognition (${language.toUpperCase()})` },
-          { value: `${langPrefix}_PP-OCRv3_rec`, label: `PaddleOCR v3 Recognition (${language.toUpperCase()})` }
+          { value: `${langPrefix}_PP-OCRv4_rec`, label: `Standard PaddleOCR v4 Recognition (${language.toUpperCase()})` },
+          { value: `${langPrefix}_PP-OCRv3_rec`, label: `Standard PaddleOCR v3 Recognition (${language.toUpperCase()})` }
         );
         break;
       case 'cls':
         models.push(
-          { value: `${langPrefix}_ppocr_mobile_v2.0_cls`, label: `PaddleOCR Classification (${language.toUpperCase()})` }
+          { value: `${langPrefix}_ppocr_mobile_v2.0_cls`, label: `Standard PaddleOCR Classification (${language.toUpperCase()})` }
         );
         break;
     }
@@ -1133,6 +1212,55 @@ const ModelTraining = ({ onNotification }) => {
                   ))}
                 </Select>
               </FormControl>
+
+              {/* Custom Model Paths for PaddleOCR */}
+              {datasets.find(d => d.id === selectedDataset)?.dataset_type === DATASET_TYPES.PADDLEOCR && 
+               trainingConfig.baseModel === 'custom' && (
+                <Box sx={{ mt: 2, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1, backgroundColor: 'grey.50' }}>
+                  <Typography variant="subtitle2" gutterBottom>
+                    Custom Model Configuration
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Provide paths to your existing PaddleOCR model files for fine-tuning. You can use absolute paths or relative paths from the project root.
+                  </Typography>
+                  
+                  {trainingConfig.trainType === 'det' && (
+                    <TextField
+                      fullWidth
+                      label="Detection Model Path"
+                      value={trainingConfig.customDetectionModelPath}
+                      onChange={(e) => setTrainingConfig({ ...trainingConfig, customDetectionModelPath: e.target.value })}
+                      placeholder="./models/detection/inference.pdmodel (or full directory path)"
+                      margin="normal"
+                      helperText="Path to your custom detection model directory or .pdmodel file"
+                    />
+                  )}
+                  
+                  {trainingConfig.trainType === 'rec' && (
+                    <TextField
+                      fullWidth
+                      label="Recognition Model Path"
+                      value={trainingConfig.customRecognitionModelPath}
+                      onChange={(e) => setTrainingConfig({ ...trainingConfig, customRecognitionModelPath: e.target.value })}
+                      placeholder="./models/recognition/inference.pdmodel (or full directory path)"
+                      margin="normal"
+                      helperText="Path to your custom recognition model directory or .pdmodel file"
+                    />
+                  )}
+                  
+                  {trainingConfig.trainType === 'cls' && (
+                    <TextField
+                      fullWidth
+                      label="Classification Model Path"
+                      value={trainingConfig.customClassificationModelPath}
+                      onChange={(e) => setTrainingConfig({ ...trainingConfig, customClassificationModelPath: e.target.value })}
+                      placeholder="./models/classification/inference.pdmodel (or full directory path)"
+                      margin="normal"
+                      helperText="Path to your custom classification model directory or .pdmodel file"
+                    />
+                  )}
+                </Box>
+              )}
 
               <Accordion sx={{ mt: 2 }}>
                 <AccordionSummary expandIcon={<ExpandMoreIcon />}>
