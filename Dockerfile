@@ -40,12 +40,30 @@ ENV LC_ALL=C.UTF-8
 COPY requirements.txt .
 
 # Install Python dependencies with optimized settings
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
+# Install core dependencies first
+RUN pip install --no-cache-dir fastapi==0.104.1 uvicorn[standard]==0.24.0 pydantic==2.5.0 \
+    pydantic-settings==2.1.0 python-multipart==0.0.6 opencv-python-headless==4.8.1.78 \
+    ffmpeg-python==0.2.0 pillow==10.1.0 numpy==1.24.3 requests==2.31.0 aiohttp==3.9.1 \
+    redis==5.0.1 python-dotenv==1.0.0 pyyaml==6.0.1 loguru==0.7.2 jinja2==3.1.2 tenacity==8.2.3
+
+# Install AI/ML dependencies
+RUN pip install --no-cache-dir ollama==0.1.7 ultralytics>=8.0.0 torch>=2.0.0 torchvision>=0.15.0
+
+# Install PaddleOCR dependencies carefully
+RUN pip install --no-cache-dir paddlepaddle>=3.0.0 && \
+    pip install --no-cache-dir paddleocr>=2.7.0 && \
+    pip install --no-cache-dir shapely>=2.0.0 scikit-image>=0.21.0 lmdb>=1.4.0 \
+    tqdm>=4.66.0 attrdict>=2.0.1 openpyxl>=3.1.0
+
+# Install testing dependencies
+RUN pip install --no-cache-dir pytest==7.4.3 pytest-bdd==6.1.1 pytest-asyncio==0.21.1 \
+    pytest-cov==4.1.0 pytest-html==4.1.1 black==23.11.0 flake8==6.1.0 mypy==1.7.0 pre-commit==3.5.0
 
 # Post-installation verification for PaddleOCR
 RUN python -c "import paddle; print('PaddlePaddle version:', paddle.__version__)" && \
-    python -c "import paddleocr; print('PaddleOCR imported successfully')" && \
+    python -c "from paddleocr import PaddleOCR; print('PaddleOCR imported successfully')" && \
     python -c "import cv2; print('OpenCV version:', cv2.__version__)"
 
 # Copy application code

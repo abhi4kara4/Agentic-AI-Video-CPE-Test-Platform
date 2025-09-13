@@ -7,27 +7,26 @@ This document outlines the changes made to enable real PaddleOCR training instea
 ### 1. Updated Dockerfile
 - **Added PaddlePaddle dependencies**: System packages for OpenCV, image processing, and compilation tools
 - **Environment variables**: Proper encoding and locale settings for PaddlePaddle
+- **Staged installation**: Install dependencies in logical groups to avoid conflicts
 - **Verification steps**: Post-installation checks to ensure PaddleOCR works correctly
 - **Directory structure**: Created proper directories for models and manifests
 - **Pre-trained models**: Download script to populate common models during build
 
 ### 2. Updated requirements.txt
-Added PaddleOCR and all required dependencies:
+Added PaddleOCR and required dependencies (compatible with Python 3.11):
 ```
-paddlepaddle==2.5.2
-paddleocr==2.7.3
-paddlenlp==2.6.1
-shapely==2.0.2
-scikit-image==0.21.0
-imgaug==0.4.0
-lmdb==1.4.1
-tqdm==4.66.1
-attrdict==2.0.1
-Polygon3==3.0.9.1
-lanms-nova==1.0.2
-premailer==3.10.0
-openpyxl==3.1.2
+paddlepaddle>=3.0.0
+paddleocr>=2.7.0
+paddlenlp>=2.6.0
+shapely>=2.0.0
+scikit-image>=0.21.0
+lmdb>=1.4.0
+tqdm>=4.66.0
+attrdict>=2.0.1
+openpyxl>=3.1.0
 ```
+
+**Note**: Updated to PaddlePaddle 3.0+ which is compatible with Python 3.11
 
 ### 3. Updated PaddleOCR Trainer
 - **Fixed import statement**: Proper PaddleOCR import
@@ -102,3 +101,36 @@ Models will be stored in:
 4. **Check output** - real model files with proper weights instead of empty placeholders
 
 The training will now use actual PaddleOCR algorithms and produce deployable models for production use.
+
+## Troubleshooting
+
+### Build Issues
+
+**1. Python Version Compatibility**
+- Issue: `ERROR: Could not find a version that satisfies the requirement paddlepaddle==X.X.X`
+- Solution: The Dockerfile now uses `paddlepaddle>=3.0.0` which is compatible with Python 3.11
+
+**2. ARM64 Architecture Issues**
+- Issue: Some packages may not have ARM64 wheels
+- Solution: The Dockerfile includes build tools to compile from source if needed
+
+**3. Memory Issues During Build**
+- Issue: Docker build runs out of memory
+- Solution: Increase Docker memory limit or use staged installation approach
+
+### Runtime Issues
+
+**1. Import Errors**
+```bash
+# Check if PaddleOCR is properly installed
+docker exec ai-test-platform python -c "import paddle; print(paddle.__version__)"
+docker exec ai-test-platform python -c "from paddleocr import PaddleOCR; print('Success')"
+```
+
+**2. Model Download Failures**
+- The system will gracefully fall back to simulation if pre-trained models can't be downloaded
+- Training functionality will still work with user-provided data
+
+**3. Performance Issues**
+- First training run may be slower as PaddlePaddle optimizes for your hardware
+- Subsequent runs will be faster due to compiled optimizations

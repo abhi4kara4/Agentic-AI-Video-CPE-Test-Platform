@@ -11,16 +11,19 @@ from pathlib import Path
 def download_paddleocr_models():
     """Download commonly used PaddleOCR models"""
     try:
+        import paddle
+        print(f"PaddlePaddle {paddle.__version__} detected")
+        
         from paddleocr import PaddleOCR
+        print("PaddleOCR import successful")
         
         # Create models directory
         models_dir = Path("Archive/paddleocr_models")
         models_dir.mkdir(parents=True, exist_ok=True)
         
-        # Languages and model types to download
+        # Languages and model types to download (conservative approach)
         models_to_download = [
-            {'lang': 'en', 'use_angle_cls': True, 'show_log': False},
-            {'lang': 'ch', 'use_angle_cls': True, 'show_log': False},
+            {'lang': 'en', 'use_angle_cls': False, 'show_log': False},  # Start with simpler config
         ]
         
         manifest = {
