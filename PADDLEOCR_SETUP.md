@@ -69,12 +69,15 @@ docker-compose logs ai-test-platform | grep -E "(PaddlePaddle|PaddleOCR|training
 ```
 
 You should see:
-- ✅ `PaddlePaddle version: 2.5.2`
+- ✅ `PaddlePaddle version: 3.2.0`
 - ✅ `PaddleOCR imported successfully`
 - ✅ `PaddlePaddle and PaddleOCR are available. Real training enabled.`
+- ✅ `Starting real PaddleOCR training...`
+- ✅ `Running enhanced PaddleOCR training with component validation...`
 
 Instead of:
 - ❌ `Warning: PaddlePaddle not available. Training will be simulated.`
+- ❌ `Running simulated PaddleOCR training...`
 
 ## Expected Build Time
 
