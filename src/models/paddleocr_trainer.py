@@ -20,7 +20,7 @@ except ImportError:
     PADDLE_AVAILABLE = False
 
 try:
-    import PaddleOCR
+    from paddleocr import PaddleOCR
     PADDLEOCR_AVAILABLE = True
 except ImportError:
     PADDLEOCR_AVAILABLE = False
@@ -40,6 +40,10 @@ class PaddleOCRTrainer:
         """
         if not PADDLE_AVAILABLE:
             print("Warning: PaddlePaddle not available. Training will be simulated.")
+        elif not PADDLEOCR_AVAILABLE:
+            print("Warning: PaddleOCR not available. Training will be simulated.")
+        else:
+            print("PaddlePaddle and PaddleOCR are available. Real training enabled.")
         
         self.dataset_path = Path(dataset_path)
         self.model_name = model_name
