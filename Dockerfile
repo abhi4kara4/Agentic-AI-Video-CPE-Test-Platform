@@ -54,6 +54,7 @@ RUN pip install --no-cache-dir ollama==0.1.7 ultralytics>=8.0.0 torch>=2.0.0 tor
 # Install PaddleOCR dependencies carefully
 RUN pip install --no-cache-dir paddlepaddle>=3.0.0 && \
     pip install --no-cache-dir paddleocr>=2.7.0 && \
+    pip install --no-cache-dir paddlex>=3.0.0 paddlenlp>=2.6.0 visualdl>=2.5.0 && \
     pip install --no-cache-dir shapely>=2.0.0 scikit-image>=0.21.0 lmdb>=1.4.0 \
     tqdm>=4.66.0 attrdict>=2.0.1 openpyxl>=3.1.0
 
