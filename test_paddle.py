@@ -4,7 +4,7 @@ import os
 sys.path.insert(0, '/app')
 
 try:
-    import paddlepaddle as paddle
+    import paddle
     print('PaddlePaddle available:', paddle.__version__)
     PADDLE_AVAILABLE = True
 except ImportError as e:
@@ -27,7 +27,7 @@ print()
 print('Testing trainer detection logic:')
 
 try:
-    import paddlepaddle as paddle
+    import paddle
     print('Trainer - PaddlePaddle detected')
     trainer_paddle = True
 except ImportError:

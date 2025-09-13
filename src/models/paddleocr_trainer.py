@@ -14,7 +14,7 @@ import subprocess
 import sys
 
 try:
-    import paddlepaddle as paddle
+    import paddle
     PADDLE_AVAILABLE = True
 except ImportError:
     PADDLE_AVAILABLE = False
