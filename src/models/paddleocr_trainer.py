@@ -541,9 +541,16 @@ class PaddleOCRTrainer:
             print(f"   CDN URL: {cdn_url}")
             
             import aiohttp
-            import aiofiles
             import tarfile
             import tempfile
+            
+            # Try to import aiofiles, fallback if not available
+            try:
+                import aiofiles
+                AIOFILES_AVAILABLE = True
+            except ImportError:
+                AIOFILES_AVAILABLE = False
+                print("⚠️  aiofiles not available - using synchronous file operations")
             
             # Create models directory in training folder
             models_dir = training_dir / "base_models"
@@ -562,14 +569,26 @@ class PaddleOCRTrainer:
                         
                         # Save downloaded file
                         archive_path = models_dir / f"{base_model}.tar"
-                        async with aiofiles.open(archive_path, 'wb') as f:
-                            downloaded = 0
-                            async for chunk in response.content.iter_chunked(8192):
-                                await f.write(chunk)
-                                downloaded += len(chunk)
-                                if content_length and downloaded % (1024 * 1024) == 0:  # Every MB
-                                    progress = (downloaded / int(content_length)) * 100
-                                    print(f"📊 Download progress: {progress:.1f}%")
+                        downloaded = 0
+                        
+                        if AIOFILES_AVAILABLE:
+                            # Use async file operations
+                            async with aiofiles.open(archive_path, 'wb') as f:
+                                async for chunk in response.content.iter_chunked(8192):
+                                    await f.write(chunk)
+                                    downloaded += len(chunk)
+                                    if content_length and downloaded % (1024 * 1024) == 0:  # Every MB
+                                        progress = (downloaded / int(content_length)) * 100
+                                        print(f"📊 Download progress: {progress:.1f}%")
+                        else:
+                            # Use synchronous file operations as fallback
+                            with open(archive_path, 'wb') as f:
+                                async for chunk in response.content.iter_chunked(8192):
+                                    f.write(chunk)
+                                    downloaded += len(chunk)
+                                    if content_length and downloaded % (1024 * 1024) == 0:  # Every MB
+                                        progress = (downloaded / int(content_length)) * 100
+                                        print(f"📊 Download progress: {progress:.1f}%")
                         
                         print(f"✅ Downloaded: {archive_path} ({archive_path.stat().st_size / (1024*1024):.2f} MB)")
                         
