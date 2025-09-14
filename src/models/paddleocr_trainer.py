@@ -45,11 +45,22 @@ class PaddleOCRTrainer:
         else:
             print("PaddlePaddle and PaddleOCR are available. Real training enabled.")
         
-        self.dataset_path = Path(dataset_path)
+        # Ensure dataset path is absolute for Docker container compatibility
+        if Path(dataset_path).is_absolute():
+            self.dataset_path = Path(dataset_path)
+        else:
+            # Convert relative path to absolute within container working directory
+            self.dataset_path = Path("/app") / dataset_path
+        
         self.model_name = model_name
         self.output_dir = Path(output_dir)
         self.project_name = project_name
         self.training_results = None
+        
+        print(f"🔍 Dataset path resolved to: {self.dataset_path}")
+        print(f"🔍 Dataset path exists: {self.dataset_path.exists()}")
+        if self.dataset_path.exists():
+            print(f"🔍 Dataset directory contents: {list(self.dataset_path.iterdir())}")
         
         # Determine training type from model name
         if 'det' in model_name.lower():
@@ -66,9 +77,22 @@ class PaddleOCRTrainer:
         
     def validate_dataset(self) -> bool:
         """Validate dataset structure and files for PaddleOCR training"""
+        
+        # Check if dataset directory exists
+        if not self.dataset_path.exists():
+            print(f"❌ ERROR: Dataset directory not found: {self.dataset_path}")
+            print(f"🛠️  SOLUTION: Create a PaddleOCR dataset first using:")
+            print(f"   1. Go to Dataset Creation page")
+            print(f"   2. Select your annotated images")  
+            print(f"   3. Choose 'PaddleOCR' format")
+            print(f"   4. Generate the dataset")
+            print(f"   5. Then run training on the generated dataset")
+            return False
+            
         config_path = self.dataset_path / 'paddleocr_config.yml'
         if not config_path.exists():
-            print(f"Error: PaddleOCR config file not found at {config_path}")
+            print(f"❌ ERROR: PaddleOCR config file not found at {config_path}")
+            print(f"🛠️  SOLUTION: Regenerate dataset - config file is missing")
             return False
         
         # Check for required files based on training type
@@ -78,19 +102,51 @@ class PaddleOCRTrainer:
         elif self.train_type == 'rec':
             required_files.append('rec_gt_train.txt')
         
+        missing_files = []
         for file_name in required_files:
             file_path = self.dataset_path / file_name
             if not file_path.exists():
-                print(f"Error: Required file not found: {file_path}")
-                return False
+                missing_files.append(str(file_path))
+        
+        if missing_files:
+            print(f"❌ ERROR: Required PaddleOCR files missing:")
+            for missing in missing_files:
+                print(f"   - {missing}")
+            print(f"🛠️  SOLUTION: Regenerate dataset with PaddleOCR format")
+            return False
         
         # Check images directory
         images_dir = self.dataset_path / 'images'
         if not images_dir.exists() or not any(images_dir.iterdir()):
-            print(f"Error: Images directory is empty or missing: {images_dir}")
+            print(f"❌ ERROR: Images directory is empty or missing: {images_dir}")
+            print(f"🛠️  SOLUTION: Add annotated images to your dataset")
             return False
         
-        print(f"Dataset validation passed for PaddleOCR {self.train_type} training")
+        # Count actual training samples
+        det_samples = 0
+        rec_samples = 0
+        
+        if self.train_type == 'det' and (self.dataset_path / 'det_gt_train.txt').exists():
+            with open(self.dataset_path / 'det_gt_train.txt', 'r') as f:
+                det_samples = len([l for l in f.readlines() if l.strip()])
+                
+        if self.train_type == 'rec' and (self.dataset_path / 'rec_gt_train.txt').exists():
+            with open(self.dataset_path / 'rec_gt_train.txt', 'r') as f:
+                rec_samples = len([l for l in f.readlines() if l.strip()])
+        
+        total_samples = det_samples if self.train_type == 'det' else rec_samples
+        
+        if total_samples == 0:
+            print(f"❌ ERROR: No training samples found for {self.train_type} training")
+            print(f"🛠️  SOLUTION: Add text annotations to your images:")
+            print(f"   - Go to Dataset Labeling page") 
+            print(f"   - Draw bounding boxes around text")
+            print(f"   - Add text labels (for recognition training)")
+            print(f"   - Regenerate PaddleOCR dataset")
+            return False
+        
+        print(f"✅ Dataset validation passed for PaddleOCR {self.train_type} training")
+        print(f"📊 Found {total_samples} training samples")
         return True
     
     async def train_async(self, config: Dict[str, Any], progress_callback: Optional[Callable] = None) -> Dict[str, Any]:
