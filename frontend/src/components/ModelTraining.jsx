@@ -56,6 +56,7 @@ import {
   Timeline as TimelineIcon,
   Assessment as AssessmentIcon,
   Upload as UploadIcon,
+  Refresh as RefreshIcon,
 } from '@mui/icons-material';
 import { trainingAPI, datasetAPI, wsManager } from '../services/api.jsx';
 import { DATASET_TYPES, DATASET_TYPE_INFO } from '../constants/datasetTypes.js';
