@@ -201,6 +201,14 @@ class PaddleOCRTrainer:
         try:
             print("Executing real PaddleOCR training...")
             
+            # Download base model from CDN if specified
+            base_model_path = await self._download_base_model(config, training_dir)
+            if base_model_path:
+                print(f"✅ Base model downloaded and ready: {base_model_path}")
+                self.model_name = str(base_model_path)
+            else:
+                print(f"⚠️  Using default model name: {self.model_name}")
+            
             # Copy config to training directory and modify for training
             config_path = self.dataset_path / 'paddleocr_config.yml'
             training_config_path = training_dir / 'training_config.yml'
@@ -379,15 +387,36 @@ class PaddleOCRTrainer:
             
             training_time = time.time() - start_time
             
-            # Save the trained model
+            # Save the trained model with proper PaddlePaddle format
             model_path = training_dir / f"direct_paddle_model_{self.train_type}.pdmodel"
+            params_path = training_dir / f"direct_paddle_model_{self.train_type}.pdiparams"
+            
             try:
-                paddle.save(model.state_dict(), str(model_path))
-                print(f"Model weights saved to: {model_path}")
+                # Save model architecture and parameters separately (PaddlePaddle format)
+                paddle.save(model.state_dict(), str(params_path))
+                
+                # Also save the complete model for inference
+                paddle.jit.save(model, str(model_path.with_suffix('')))
+                print(f"✅ Model weights saved:")
+                print(f"   Parameters: {params_path} ({params_path.stat().st_size / 1024:.1f} KB)")
+                print(f"   Model: {model_path} ({model_path.stat().st_size / 1024:.1f} KB)")
+                
+                # Store both paths for export
+                self.trained_model_files = {
+                    'model_path': model_path,
+                    'params_path': params_path
+                }
+                
             except Exception as e:
-                print(f"Warning: Could not save model weights: {e}")
-                # Create a basic model file anyway
+                print(f"❌ Warning: Could not save model weights: {e}")
+                # Create basic model files anyway
                 model_path.touch()
+                params_path.touch()
+                
+                self.trained_model_files = {
+                    'model_path': model_path,
+                    'params_path': params_path
+                }
             
             print(f"Direct PaddlePaddle training completed in {training_time:.1f}s")
             
@@ -480,6 +509,83 @@ class PaddleOCRTrainer:
                 return self.backbone(x)
         
         return SimpleClassificationModel()
+    
+    async def _download_base_model(self, config: Dict[str, Any], training_dir: Path) -> Optional[str]:
+        """Download base model from CDN if specified"""
+        try:
+            base_model = config.get('base_model', '').strip()
+            cdn_url = config.get('cdn_url', '').strip()
+            
+            if not base_model or not cdn_url:
+                print("📝 No CDN model specified - using default pretrained model")
+                return None
+                
+            print(f"📥 Downloading base model from CDN...")
+            print(f"   Model: {base_model}")
+            print(f"   CDN URL: {cdn_url}")
+            
+            import aiohttp
+            import aiofiles
+            import tarfile
+            import tempfile
+            
+            # Create models directory in training folder
+            models_dir = training_dir / "base_models"
+            models_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Download the model archive
+            async with aiohttp.ClientSession() as session:
+                print(f"🌐 Connecting to CDN: {cdn_url}")
+                async with session.get(cdn_url) as response:
+                    if response.status == 200:
+                        # Get content length for progress tracking
+                        content_length = response.headers.get('content-length')
+                        if content_length:
+                            file_size_mb = int(content_length) / (1024 * 1024)
+                            print(f"📦 Downloading model archive: {file_size_mb:.2f} MB")
+                        
+                        # Save downloaded file
+                        archive_path = models_dir / f"{base_model}.tar"
+                        async with aiofiles.open(archive_path, 'wb') as f:
+                            downloaded = 0
+                            async for chunk in response.content.iter_chunked(8192):
+                                await f.write(chunk)
+                                downloaded += len(chunk)
+                                if content_length and downloaded % (1024 * 1024) == 0:  # Every MB
+                                    progress = (downloaded / int(content_length)) * 100
+                                    print(f"📊 Download progress: {progress:.1f}%")
+                        
+                        print(f"✅ Downloaded: {archive_path} ({archive_path.stat().st_size / (1024*1024):.2f} MB)")
+                        
+                        # Extract the archive
+                        extract_dir = models_dir / base_model
+                        extract_dir.mkdir(exist_ok=True)
+                        
+                        print(f"📂 Extracting model archive...")
+                        with tarfile.open(archive_path, 'r') as tar:
+                            tar.extractall(extract_dir)
+                        
+                        # Find the model files
+                        model_files = list(extract_dir.rglob("*.pdmodel")) + list(extract_dir.rglob("*.pdiparams"))
+                        if model_files:
+                            print(f"🎯 Found {len(model_files)} model files:")
+                            for mf in model_files:
+                                print(f"   - {mf.name}")
+                            
+                            return str(extract_dir)
+                        else:
+                            print("⚠️  No PaddlePaddle model files found in archive")
+                            return str(extract_dir)
+                    
+                    else:
+                        print(f"❌ Failed to download model - HTTP {response.status}")
+                        return None
+                        
+        except Exception as e:
+            print(f"❌ Error downloading base model: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
     
     def _load_training_data(self):
         """Load real training data from PaddleOCR dataset files"""
@@ -716,34 +822,84 @@ class PaddleOCRTrainer:
             model_filename = f"{project_name}_{self.train_type}_{language}_{timestamp}_infer.tar"
             model_archive_path = model_type_dir / model_filename
             
-            # Create temporary directory for model files (simulated for now)
+            # Create temporary directory for model files  
             temp_model_dir = training_dir / "inference_model"
             temp_model_dir.mkdir(exist_ok=True)
             
-            # In real implementation, you would copy actual trained model files
-            # For now, create placeholder files matching PaddleOCR inference format
-            model_files = [
-                "inference.pdmodel",
-                "inference.pdiparams", 
-                "inference.pdiparams.info"
-            ]
+            # Copy actual trained model files if they exist
+            if hasattr(self, 'trained_model_files') and self.trained_model_files:
+                print(f"📦 Packaging trained model files...")
+                
+                # Copy actual model files to inference directory
+                model_files_copied = []
+                
+                if self.trained_model_files['params_path'].exists():
+                    # Copy parameters file
+                    params_source = self.trained_model_files['params_path']
+                    params_dest = temp_model_dir / "inference.pdiparams"
+                    shutil.copy2(params_source, params_dest)
+                    model_files_copied.append(params_dest)
+                    print(f"   ✅ Copied parameters: {params_dest.name} ({params_dest.stat().st_size / 1024:.1f} KB)")
+                
+                if self.trained_model_files['model_path'].exists():
+                    # Copy model file
+                    model_source = self.trained_model_files['model_path']
+                    model_dest = temp_model_dir / "inference.pdmodel"
+                    shutil.copy2(model_source, model_dest)
+                    model_files_copied.append(model_dest)
+                    print(f"   ✅ Copied model: {model_dest.name} ({model_dest.stat().st_size / 1024:.1f} KB)")
+                
+                # Create info file if parameters exist
+                if (temp_model_dir / "inference.pdiparams").exists():
+                    info_file = temp_model_dir / "inference.pdiparams.info"
+                    with open(info_file, 'w') as f:
+                        f.write("# PaddlePaddle model parameters info\n")
+                        f.write(f"# Generated from training: {datetime.now().isoformat()}\n")
+                        f.write(f"# Training type: {self.train_type}\n")
+                        f.write(f"# Language: {language}\n")
+                    model_files_copied.append(info_file)
+                    print(f"   ✅ Created info file: {info_file.name}")
+                
+                if not model_files_copied:
+                    print("⚠️  No trained model files found - creating placeholder files")
+                    # Fallback to placeholder files
+                    for file_name in ["inference.pdmodel", "inference.pdiparams", "inference.pdiparams.info"]:
+                        model_file = temp_model_dir / file_name
+                        model_file.touch()
             
-            for file_name in model_files:
-                model_file = temp_model_dir / file_name
-                model_file.touch()  # Create empty placeholder file
+            else:
+                print("⚠️  No trained model files available - creating placeholder files")
+                # Create placeholder files matching PaddleOCR inference format
+                model_files = [
+                    "inference.pdmodel",
+                    "inference.pdiparams", 
+                    "inference.pdiparams.info"
+                ]
+                
+                for file_name in model_files:
+                    model_file = temp_model_dir / file_name
+                    model_file.touch()  # Create empty placeholder file
             
             # Create tar archive matching your existing format
+            print(f"📦 Creating model archive...")
             with tarfile.open(model_archive_path, 'w') as tar:
+                total_size = 0
                 for file_path in temp_model_dir.iterdir():
                     tar.add(file_path, arcname=file_path.name)
+                    total_size += file_path.stat().st_size
+                    print(f"   Added: {file_path.name} ({file_path.stat().st_size / 1024:.1f} KB)")
+            
+            final_archive_size = model_archive_path.stat().st_size / (1024 * 1024)
+            print(f"✅ Model archive created: {final_archive_size:.2f} MB")
             
             # Also create in volume mount for download
             volume_archive_path = volume_model_dir / model_filename
             try:
                 shutil.copy2(model_archive_path, volume_archive_path)
-                print(f"Model copied to volume mount: {volume_archive_path}")
+                volume_size = volume_archive_path.stat().st_size / (1024 * 1024) 
+                print(f"✅ Model copied to volume mount: {volume_archive_path} ({volume_size:.2f} MB)")
             except Exception as e:
-                print(f"Could not copy to volume mount: {e}")
+                print(f"❌ Could not copy to volume mount: {e}")
             
             # Update manifest.json to include the new model
             self.update_manifest(archive_base, language, model_filename, model_archive_path)
