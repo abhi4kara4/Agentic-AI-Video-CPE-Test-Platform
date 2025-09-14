@@ -467,6 +467,9 @@ class PaddleOCRTrainer:
                         
                         print(f"✅ Created fallback model info: {model_path.with_suffix('.json')}")
                         print(f"✅ Created model placeholder: {model_path} (parameters are safe)")
+                    
+                    except Exception as fallback_error:
+                        print(f"❌ Even fallback failed: {fallback_error}")
                 
                 # Store both paths for export
                 self.trained_model_files = {
