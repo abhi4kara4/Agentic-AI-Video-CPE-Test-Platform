@@ -32,27 +32,33 @@
 ```
 PaddlePaddle and PaddleOCR are available. Real training enabled.
 Executing real PaddleOCR training...
-Running PaddleOCR training command: python -m paddleocr.tools.train -c config.yml
-Training output: [epoch: 1/10] loss: 2.34...
-Real training progress: loss: 1.87...
-Real PaddleOCR training completed successfully in 45.2s
+Attempting to use PaddleX for real training...
+PaddleX detected, attempting real training...
+OR
+PaddleX not available, trying direct PaddlePaddle training...
+PaddlePaddle components imported successfully
+Starting direct PaddlePaddle training for 10 epochs...
+Epoch 1/10 - Direct PaddlePaddle - Loss: 1.2345
+Direct PaddlePaddle training completed in 45.2s
 ```
 
-### ❌ Error Case (Missing Training Tools)
+### ❌ Error Case (No Training Available)
 ```
-PaddleOCR training tools not available. Please ensure PaddleOCR is properly installed with training components.
+Direct PaddlePaddle training failed: [specific error]
 ```
 
-## Training Command Structure
+## Training Approaches
 
-The real training uses PaddleOCR's official training command:
-```bash
-python -m paddleocr.tools.train \
-  -c training_config.yml \
-  -o Global.epoch_num=10 \
-  -o Global.save_model_dir=./checkpoints \
-  -o Optimizer.lr.learning_rate=0.001
-```
+### 1. PaddleX Training (Preferred)
+- Uses PaddleX framework for OCR training
+- Requires proper PaddleX dataset format
+- Most feature-complete approach
+
+### 2. Direct PaddlePaddle Training (Fallback)
+- Uses raw PaddlePaddle neural network components
+- Creates simple CNN models for text detection/recognition
+- Real gradient descent and backpropagation
+- Actual model weight updates
 
 ## Key Benefits
 
