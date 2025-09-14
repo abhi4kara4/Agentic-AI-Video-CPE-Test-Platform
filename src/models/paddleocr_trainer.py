@@ -486,40 +486,110 @@ class PaddleOCRTrainer:
         try:
             import cv2
             from PIL import Image
+            import json
             
             train_data = []
             
             if self.train_type == 'det':
                 # Load detection training data
                 det_file = self.dataset_path / 'det_gt_train.txt'
+                print(f"📂 Loading detection data from: {det_file}")
+                
                 if det_file.exists():
                     with open(det_file, 'r', encoding='utf-8') as f:
-                        for line in f:
-                            parts = line.strip().split('\t')
-                            if len(parts) >= 2:
-                                img_path = self.dataset_path / 'images' / parts[0]
-                                if img_path.exists():
-                                    train_data.append({
-                                        'image_path': str(img_path),
-                                        'label': parts[1],  # Detection annotations
-                                        'type': 'detection'
-                                    })
+                        lines = f.readlines()
+                        print(f"📄 Found {len(lines)} lines in det_gt_train.txt")
+                        
+                        for line_idx, line in enumerate(lines):
+                            line = line.strip()
+                            if not line:
+                                continue
+                                
+                            print(f"🔍 Processing line {line_idx + 1}: {line[:100]}...")
+                            
+                            try:
+                                # PaddleOCR det format: image_path\t[{"transcription": "text", "points": [[x1,y1],...]}]
+                                parts = line.split('\t')
+                                if len(parts) >= 2:
+                                    img_relative_path = parts[0]
+                                    annotations_str = parts[1]
+                                    
+                                    # Handle images/ prefix
+                                    if img_relative_path.startswith('images/'):
+                                        img_name = img_relative_path[7:]  # Remove 'images/' prefix
+                                    else:
+                                        img_name = img_relative_path
+                                    
+                                    img_path = self.dataset_path / 'images' / img_name
+                                    print(f"   📷 Looking for image: {img_path}")
+                                    
+                                    if img_path.exists():
+                                        # Parse JSON annotations
+                                        try:
+                                            annotations = json.loads(annotations_str)
+                                            train_data.append({
+                                                'image_path': str(img_path),
+                                                'label': annotations,  # JSON annotations
+                                                'type': 'detection'
+                                            })
+                                            print(f"   ✅ Added detection sample with {len(annotations)} text regions")
+                                        except json.JSONDecodeError as je:
+                                            print(f"   ❌ JSON decode error: {je}")
+                                            print(f"   📝 Raw annotations: {annotations_str[:200]}")
+                                    else:
+                                        print(f"   ❌ Image not found: {img_path}")
+                                else:
+                                    print(f"   ❌ Invalid line format - expected 2 parts, got {len(parts)}")
+                            except Exception as le:
+                                print(f"   ❌ Error processing line: {le}")
+                                
+                else:
+                    print(f"❌ Detection file not found: {det_file}")
                             
             elif self.train_type == 'rec':
                 # Load recognition training data
                 rec_file = self.dataset_path / 'rec_gt_train.txt'
+                print(f"📂 Loading recognition data from: {rec_file}")
+                
                 if rec_file.exists():
                     with open(rec_file, 'r', encoding='utf-8') as f:
-                        for line in f:
-                            parts = line.strip().split('\t')
-                            if len(parts) >= 2:
-                                img_path = self.dataset_path / 'images' / parts[0]
-                                if img_path.exists():
-                                    train_data.append({
-                                        'image_path': str(img_path),
-                                        'label': parts[1],  # Text content
-                                        'type': 'recognition'
-                                    })
+                        lines = f.readlines()
+                        print(f"📄 Found {len(lines)} lines in rec_gt_train.txt")
+                        
+                        for line_idx, line in enumerate(lines):
+                            line = line.strip()
+                            if not line:
+                                continue
+                                
+                            try:
+                                # PaddleOCR rec format: cropped_image_path\ttext_content
+                                parts = line.split('\t')
+                                if len(parts) >= 2:
+                                    img_relative_path = parts[0]
+                                    text_content = parts[1]
+                                    
+                                    # Handle images/ prefix
+                                    if img_relative_path.startswith('images/'):
+                                        img_name = img_relative_path[7:]
+                                    else:
+                                        img_name = img_relative_path
+                                    
+                                    img_path = self.dataset_path / 'images' / img_name
+                                    
+                                    if img_path.exists():
+                                        train_data.append({
+                                            'image_path': str(img_path),
+                                            'label': text_content,  # Text content
+                                            'type': 'recognition'
+                                        })
+                                        print(f"   ✅ Added recognition sample: '{text_content}'")
+                                    else:
+                                        print(f"   ❌ Image not found: {img_path}")
+                            except Exception as le:
+                                print(f"   ❌ Error processing line: {le}")
+                                
+                else:
+                    print(f"❌ Recognition file not found: {rec_file}")
                                     
             else:  # classification
                 # Load classification training data
@@ -537,11 +607,13 @@ class PaddleOCRTrainer:
                                         'type': 'classification'
                                     })
             
-            print(f"Loaded {len(train_data)} real training samples for {self.train_type}")
+            print(f"🎯 Successfully loaded {len(train_data)} real training samples for {self.train_type}")
             return train_data
             
         except Exception as e:
-            print(f"Error loading training data: {e}")
+            print(f"❌ Error loading training data: {e}")
+            import traceback
+            traceback.print_exc()
             return []
     
     def _process_batch(self, batch_samples):
@@ -571,13 +643,15 @@ class PaddleOCRTrainer:
                 
                 # Process labels based on training type
                 if self.train_type == 'det':
-                    # Binary classification for detection
-                    batch_labels.append(1 if sample['label'] else 0)
+                    # Detection: Binary classification (has text vs no text)
+                    annotations = sample['label']
+                    has_text = len(annotations) > 0 if isinstance(annotations, list) else bool(annotations)
+                    batch_labels.append(1 if has_text else 0)
                 elif self.train_type == 'rec':
-                    # Character classification for recognition
-                    # Simple mapping - first character ASCII value mod 26
+                    # Recognition: Character classification
                     label_text = sample['label']
                     if label_text:
+                        # Use first character for classification
                         char_label = ord(label_text[0].lower()) - ord('a')
                         char_label = max(0, min(25, char_label))  # Clamp to 0-25
                     else:
