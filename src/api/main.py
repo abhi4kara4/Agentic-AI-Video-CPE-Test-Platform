@@ -2677,7 +2677,9 @@ async def execute_training_job(job_name: str, job_metadata: dict, job_dir: Path)
                     "output_dir": str(job_dir),
                     "project_name": job_metadata.get("model_name", "paddleocr_model"),
                     "language": job_metadata.get("language", "en"),
-                    "train_type": train_type
+                    "train_type": train_type,
+                    "cdn_url": job_metadata.get("cdnUrl", ""),
+                    "model_source": job_metadata.get("modelSource", "existing")
                 }
                 
                 # Progress callback for PaddleOCR training
@@ -4079,6 +4081,10 @@ async def start_training_simplified(request: dict):
         if dataset_type == "paddleocr":
             job_metadata["language"] = request.get("language", "en")
             job_metadata["trainType"] = request.get("trainType", "det")
+            
+            # Add model source information for CDN download
+            job_metadata["modelSource"] = request.get("modelSource", "existing")
+            job_metadata["cdnUrl"] = request.get("cdnUrl", "")
             
             # Add custom model paths if using custom models
             if base_model == "custom":
