@@ -245,7 +245,7 @@ class PaddleOCRTrainer:
                 print("Using direct PaddlePaddle training for reliable results...")
                 
                 # Use direct PaddlePaddle training approach
-                return await self._direct_paddle_training(config, progress_callback, training_dir, epochs)
+                return await self._direct_paddle_training(config, progress_callback, training_dir, epochs, base_model_path)
                     
             except Exception as e:
                 print(f"Error during PaddleOCR training execution: {e}")
@@ -268,18 +268,18 @@ class PaddleOCRTrainer:
             print("Falling back to direct PaddlePaddle training for immediate functionality...")
             
             # Instead of returning error, fall back to direct training
-            return await self._direct_paddle_training(config, progress_callback, training_dir, epochs)
+            return await self._direct_paddle_training(config, progress_callback, training_dir, epochs, None)
                 
         except ImportError:
             print("PaddleX not available, falling back to direct PaddlePaddle training...")
-            return await self._direct_paddle_training(config, progress_callback, training_dir, epochs)
+            return await self._direct_paddle_training(config, progress_callback, training_dir, epochs, None)
         except Exception as e:
             print(f"PaddleX training setup failed: {e}")
             print("Falling back to direct PaddlePaddle training...")
-            return await self._direct_paddle_training(config, progress_callback, training_dir, epochs)
+            return await self._direct_paddle_training(config, progress_callback, training_dir, epochs, None)
     
     async def _direct_paddle_training(self, config: Dict[str, Any], progress_callback: Optional[Callable], 
-                                      training_dir: Path, epochs: int) -> Dict[str, Any]:
+                                      training_dir: Path, epochs: int, base_model_path: Optional[str] = None) -> Dict[str, Any]:
         """Direct PaddlePaddle training implementation"""
         try:
             print("Attempting direct PaddlePaddle training...")
