@@ -178,8 +178,8 @@ class PaddleOCRTrainer:
         except Exception as e:
             print(f"❌ PaddlePaddle real model training failed: {e}")
         
-        # No fallbacks - fail if real training doesn't work
-        raise Exception("All real PaddleOCR training methods failed. Please check PaddleOCR installation and dataset format.")
+        # No fallbacks - fail with clear error message
+        raise Exception("Real PaddleOCR training failed completely. This means either:\n1. PaddleOCR installation is incomplete\n2. Downloaded model from CDN is incompatible\n3. Dataset format is incorrect\n4. Model architecture mismatch\nPlease fix the actual issue instead of using fallbacks.")
     
     async def _use_paddleocr_training_script(self, config: Dict[str, Any], progress_callback: Optional[Callable], 
                                            training_dir: Path, epochs: int) -> Dict[str, Any]:
@@ -332,30 +332,30 @@ class PaddleOCRTrainer:
             
             if base_model_path and Path(base_model_path).exists():
                 # Use downloaded CDN model for specific component
-                if self.train_type == 'det':
-                    model_kwargs['det_model_dir'] = base_model_path
-                    model_kwargs['use_angle_cls'] = False
-                    print(f"✅ Using downloaded detection model: {base_model_path}")
-                elif self.train_type == 'rec': 
-                    model_kwargs['rec_model_dir'] = base_model_path
-                    model_kwargs['det'] = False
-                    model_kwargs['cls'] = False
-                    print(f"✅ Using downloaded recognition model: {base_model_path}")
+                # Check if model files actually exist in the path
+                model_path = Path(base_model_path)
+                pdmodel_file = model_path / 'inference.pdmodel'
+                pdiparams_file = model_path / 'inference.pdiparams'
+                
+                if pdmodel_file.exists() and pdiparams_file.exists():
+                    if self.train_type == 'det':
+                        model_kwargs['det_model_dir'] = str(base_model_path)
+                        model_kwargs['use_angle_cls'] = False
+                        print(f"✅ Using downloaded detection model: {base_model_path}")
+                    elif self.train_type == 'rec': 
+                        model_kwargs['rec_model_dir'] = str(base_model_path)
+                        model_kwargs['det'] = False
+                        model_kwargs['cls'] = False
+                        print(f"✅ Using downloaded recognition model: {base_model_path}")
+                    else:
+                        model_kwargs['cls_model_dir'] = str(base_model_path)
+                        model_kwargs['det'] = False
+                        model_kwargs['rec'] = False
+                        print(f"✅ Using downloaded classification model: {base_model_path}")
                 else:
-                    model_kwargs['cls_model_dir'] = base_model_path
-                    model_kwargs['det'] = False
-                    model_kwargs['rec'] = False
-                    print(f"✅ Using downloaded classification model: {base_model_path}")
+                    raise Exception(f"Downloaded model files missing: {pdmodel_file} or {pdiparams_file} not found. Real training requires complete model files.")
             else:
-                # Use default models
-                if self.train_type == 'det':
-                    model_kwargs['use_angle_cls'] = False
-                elif self.train_type == 'rec':
-                    model_kwargs['det'] = False
-                    model_kwargs['cls'] = False
-                else:
-                    model_kwargs['det'] = False
-                    model_kwargs['rec'] = False
+                raise Exception("No base model provided from CDN. Real training requires a base model to fine-tune. Please provide a valid CDN URL with a complete PaddleOCR model.")
             
             ocr_model = PaddleOCR(**model_kwargs)
             print(f"✅ Loaded real PaddleOCR {self.train_type} model")
@@ -392,12 +392,10 @@ class PaddleOCRTrainer:
                     model = getattr(ocr_model, f'{self.train_type}_predictor')
                     print(f"✅ Found model via {self.train_type}_predictor")
             
-            # Method 3: Create a simple trainable model if we can't access the real one
+            # No fallbacks - if we can't access the real model, fail
             if model is None:
-                print(f"⚠️  Could not access real {self.train_type} model, creating trainable proxy")
-                # Use PaddleOCR for inference but create our own trainable parameters
-                model = self._create_trainable_proxy_model(ocr_model, self.train_type)
-                print("✅ Created trainable proxy model")
+                available_attrs = [attr for attr in dir(ocr_model) if not attr.startswith('_')]
+                raise Exception(f"Cannot access real {self.train_type} model from PaddleOCR object. Available attributes: {available_attrs}. Real training requires direct access to the actual PaddleOCR model.")
             
             # Get real model parameters
             if hasattr(model, 'parameters'):
@@ -406,7 +404,7 @@ class PaddleOCRTrainer:
                 total_params = sum(p.numel() for p in model_params if hasattr(p, 'numel'))
                 print(f"📊 Total trainable parameters: {total_params:,}")
             else:
-                raise Exception("Model does not have trainable parameters")
+                raise Exception(f"Real {self.train_type} model does not have trainable parameters. Model type: {type(model)}. Real training requires a model with .parameters() method.")
             
             # Use cached training data to avoid duplication
             if hasattr(self, '_cached_train_data') and self._cached_train_data:
@@ -415,7 +413,7 @@ class PaddleOCRTrainer:
             else:
                 train_data = self._load_training_data()
                 if not train_data:
-                    raise Exception("Failed to load training data")
+                    raise Exception("Failed to load training data. Real training requires valid training samples.")
             
             print(f"📂 Loaded {len(train_data)} real training samples")
             
@@ -648,8 +646,8 @@ class PaddleOCRTrainer:
             print(f"   ❌ Real model forward pass failed: {e}")
             import traceback
             print(f"   📍 Error details: {traceback.format_exc()}")
-            # Return a small loss to continue training
-            return paddle.to_tensor(0.01, dtype='float32')
+            # No fallback - fail the training
+            raise Exception(f"Real PaddleOCR model forward pass failed: {e}. Real training requires the model to work correctly.")
     
     async def _package_trained_model(self, model_file: Path, params_file: Path, training_dir: Path, config: Dict[str, Any]) -> Path:
         """Package trained model files for deployment"""
@@ -1035,8 +1033,11 @@ class PaddleOCRTrainer:
                 if not inference_yml.exists():
                     print(f"📝 Creating missing inference.yml configuration file")
                     
-                    # Create a basic inference config for PaddleOCR
+                    # Create proper PaddleOCR inference config with all required fields
                     config_content = {
+                        'model_name': 'Multilingual_PP-OCRv3_det_infer',
+                        'model_type': 'det', 
+                        'algorithm': 'DB',
                         'Global': {
                             'use_gpu': False,
                             'epoch_num': 500,
@@ -1051,25 +1052,50 @@ class PaddleOCRTrainer:
                             'save_inference_dir': None,
                             'use_visualdl': False,
                             'infer_img': None,
-                            'save_res_path': './output/det_db/predicts_db.txt'
+                            'save_res_path': './output/det_db/predicts_db.txt',
+                            'model_name': 'Multilingual_PP-OCRv3_det_infer'
                         },
                         'Architecture': {
                             'model_type': 'det',
                             'algorithm': 'DB',
-                            'Transform': None,
+                            'model_name': 'DB',
                             'Backbone': {
                                 'name': 'MobileNetV3',
                                 'scale': 0.5,
                                 'model_name': 'large'
                             },
                             'Neck': {
-                                'name': 'DBFPN',
+                                'name': 'DBFPN', 
                                 'out_channels': 256
                             },
                             'Head': {
                                 'name': 'DBHead',
                                 'k': 50
                             }
+                        },
+                        'Loss': {
+                            'name': 'DBLoss',
+                            'balance_loss': True,
+                            'main_loss_type': 'DiceLoss',
+                            'alpha': 5,
+                            'beta': 10,
+                            'ohem_ratio': 3
+                        },
+                        'Optimizer': {
+                            'name': 'Adam',
+                            'beta1': 0.9,
+                            'beta2': 0.999,
+                            'lr': {
+                                'name': 'Cosine',
+                                'learning_rate': 0.001
+                            }
+                        },
+                        'PostProcess': {
+                            'name': 'DBPostProcess',
+                            'thresh': 0.3,
+                            'box_thresh': 0.6,
+                            'max_candidates': 1000,
+                            'unclip_ratio': 1.5
                         }
                     }
                     
