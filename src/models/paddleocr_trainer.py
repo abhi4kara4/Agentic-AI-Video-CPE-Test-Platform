@@ -63,6 +63,7 @@ class PaddleOCRTrainer:
         self.output_dir = Path(output_dir)
         self.project_name = project_name
         self.training_results = None
+        self.trained_model_files = {}  # Initialize to avoid AttributeError
         
         print(f"🔍 Dataset path resolved to: {self.dataset_path}")
         print(f"🔍 Dataset path exists: {self.dataset_path.exists()}")
@@ -2503,39 +2504,51 @@ class PaddleOCRTrainer:
             temp_model_dir = training_dir / "inference_model"
             temp_model_dir.mkdir(exist_ok=True)
             
-            # Copy actual trained model files if they exist
+            # Copy actual trained model files if they exist (with safety checks)
             if hasattr(self, 'trained_model_files') and self.trained_model_files:
                 print(f"📦 Packaging trained model files...")
+                print(f"🔍 Model files structure: {self.trained_model_files}")
                 
                 # Copy actual model files to inference directory
                 model_files_copied = []
                 
-                if self.trained_model_files['params_path'].exists():
+                # Safe access to params_path
+                params_path = self.trained_model_files.get('params_path')
+                if params_path and isinstance(params_path, (str, Path)) and Path(params_path).exists():
                     # Copy parameters file
-                    params_source = self.trained_model_files['params_path']
+                    params_source = Path(params_path)
                     params_dest = temp_model_dir / "inference.pdiparams"
                     shutil.copy2(params_source, params_dest)
                     model_files_copied.append(params_dest)
                     print(f"   ✅ Copied parameters: {params_dest.name} ({params_dest.stat().st_size / 1024:.1f} KB)")
+                else:
+                    print(f"   ⚠️  Params path not valid: {params_path} (type: {type(params_path)})")
                 
-                if self.trained_model_files['model_path'].exists():
+                # Safe access to model_path
+                model_path = self.trained_model_files.get('model_path')
+                if model_path and isinstance(model_path, (str, Path)) and Path(model_path).exists():
                     # Copy model file
-                    model_source = self.trained_model_files['model_path']
+                    model_source = Path(model_path)
                     model_dest = temp_model_dir / "inference.pdmodel"
                     shutil.copy2(model_source, model_dest)
                     model_files_copied.append(model_dest)
                     print(f"   ✅ Copied model: {model_dest.name} ({model_dest.stat().st_size / 1024:.1f} KB)")
+                else:
+                    print(f"   ⚠️  Model path not valid: {model_path} (type: {type(model_path)})")
                 
                 # Create info file if parameters exist
                 if (temp_model_dir / "inference.pdiparams").exists():
                     info_file = temp_model_dir / "inference.pdiparams.info"
-                    with open(info_file, 'w') as f:
-                        f.write("# PaddlePaddle model parameters info\n")
-                        f.write(f"# Generated from training: {datetime.now().isoformat()}\n")
-                        f.write(f"# Training type: {self.train_type}\n")
-                        f.write(f"# Language: {language}\n")
-                    model_files_copied.append(info_file)
-                    print(f"   ✅ Created info file: {info_file.name}")
+                    try:
+                        with open(info_file, 'w') as f:
+                            f.write("# PaddlePaddle model parameters info\n")
+                            f.write(f"# Generated from training: {datetime.now().isoformat()}\n")
+                            f.write(f"# Training type: {self.train_type}\n")
+                            f.write(f"# Language: {language}\n")
+                        model_files_copied.append(info_file)
+                        print(f"   ✅ Created info file: {info_file.name}")
+                    except Exception as info_error:
+                        print(f"   ⚠️  Could not create info file: {info_error}")
                 
                 if not model_files_copied:
                     print("⚠️  No trained model files found - creating placeholder files")
@@ -2543,9 +2556,12 @@ class PaddleOCRTrainer:
                     for file_name in ["inference.pdmodel", "inference.pdiparams", "inference.pdiparams.info"]:
                         model_file = temp_model_dir / file_name
                         model_file.touch()
+                        print(f"   ✅ Created placeholder: {file_name}")
             
             else:
-                print("⚠️  No trained model files available - creating placeholder files")
+                print(f"⚠️  No trained model files available")
+                print(f"🔍 self.trained_model_files: {getattr(self, 'trained_model_files', 'Not set')}")
+                print(f"🔍 Creating placeholder files...")
                 # Create placeholder files matching PaddleOCR inference format
                 model_files = [
                     "inference.pdmodel",
@@ -2556,6 +2572,7 @@ class PaddleOCRTrainer:
                 for file_name in model_files:
                     model_file = temp_model_dir / file_name
                     model_file.touch()  # Create empty placeholder file
+                    print(f"   ✅ Created placeholder: {file_name}")
             
             # Create tar archive matching your existing format
             print(f"📦 Creating model archive...")
