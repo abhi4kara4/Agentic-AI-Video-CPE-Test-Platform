@@ -346,7 +346,13 @@ class PaddleOCRTrainer:
                     for epoch in range(1, epochs + 1):
                         print(f"Real PaddleOCR Training - Epoch {epoch}/{epochs}")
                         if progress_callback:
-                            await progress_callback(epoch / epochs, f"Real PaddleOCR Training - Epoch {epoch}/{epochs}")
+                            progress_data = {
+                                "epoch": epoch,
+                                "total_epochs": epochs,
+                                "progress_percentage": (epoch / epochs) * 100,
+                                "metrics": {"loss": None, "accuracy": None, "precision": None, "recall": None}
+                            }
+                            await progress_callback(progress_data)
                         
                         # Simulate some training time
                         await asyncio.sleep(0.5)
@@ -666,14 +672,24 @@ class PaddleOCRTrainer:
                 
                 print(f"Epoch {epoch}/{epochs} - Real PaddleOCR Fine-tuning - Loss: {avg_loss:.6f}")
                 
-                # Progress callback (fix signature)
+                # Progress callback (fix signature to match API expectation)
                 if progress_callback:
                     try:
-                        progress = epoch / epochs
-                        await progress_callback(progress, f"Real PaddleOCR Fine-tuning - Epoch {epoch}/{epochs} - Loss: {avg_loss:.6f}")
-                    except TypeError:
-                        # Handle callback signature mismatch
-                        await progress_callback(progress)
+                        progress_percentage = (epoch / epochs) * 100
+                        progress_data = {
+                            "epoch": epoch,
+                            "total_epochs": epochs,
+                            "progress_percentage": progress_percentage,
+                            "metrics": {
+                                "loss": float(avg_loss),
+                                "accuracy": None,  # Not available in our training
+                                "precision": None,
+                                "recall": None
+                            }
+                        }
+                        await progress_callback(progress_data)
+                    except Exception as callback_error:
+                        print(f"   ⚠️  Progress callback failed: {callback_error}")
             
             training_time = time.time() - start_time
             
@@ -842,14 +858,24 @@ class PaddleOCRTrainer:
                 
                 print(f"Epoch {epoch}/{epochs} - Direct PaddleOCR Fine-tuning - Loss: {avg_loss:.6f}")
                 
-                # Progress callback (fix signature)
+                # Progress callback (fix signature to match API expectation)
                 if progress_callback:
                     try:
-                        progress = epoch / epochs
-                        await progress_callback(progress, f"Direct PaddleOCR Fine-tuning - Epoch {epoch}/{epochs}")
-                    except TypeError:
-                        # Handle callback signature mismatch
-                        await progress_callback(progress)
+                        progress_percentage = (epoch / epochs) * 100
+                        progress_data = {
+                            "epoch": epoch,
+                            "total_epochs": epochs,
+                            "progress_percentage": progress_percentage,
+                            "metrics": {
+                                "loss": float(avg_loss),
+                                "accuracy": None,
+                                "precision": None,
+                                "recall": None
+                            }
+                        }
+                        await progress_callback(progress_data)
+                    except Exception as callback_error:
+                        print(f"   ⚠️  Progress callback failed: {callback_error}")
             
             training_time = time.time() - start_time
             
