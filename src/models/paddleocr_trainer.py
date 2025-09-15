@@ -576,24 +576,24 @@ class PaddleOCRTrainer:
             
             # Create realistic parameters for the training type
             if self.train_type == 'det':
-                # Text detection parameters
+                # Text detection parameters (fixed dimensions)
                 adaptation_params = [
                     paddle.create_parameter([64, 3, 3, 3], dtype='float32'),
                     paddle.create_parameter([128, 64, 3, 3], dtype='float32'),
-                    paddle.create_parameter([2, 128], dtype='float32')  # Binary classification
+                    paddle.create_parameter([128, 2], dtype='float32')  # Fix: 128->2 for binary classification
                 ]
             elif self.train_type == 'rec':
-                # Text recognition parameters
+                # Text recognition parameters (fixed dimensions)
                 adaptation_params = [
                     paddle.create_parameter([128, 3, 3, 3], dtype='float32'),
                     paddle.create_parameter([256, 128], dtype='float32'),
-                    paddle.create_parameter([37, 256], dtype='float32')  # Characters
+                    paddle.create_parameter([256, 37], dtype='float32')  # Fix: 256->37 for characters
                 ]
             else:
-                # Text classification parameters
+                # Text classification parameters (fixed dimensions)
                 adaptation_params = [
                     paddle.create_parameter([64, 3, 3, 3], dtype='float32'),
-                    paddle.create_parameter([4, 64], dtype='float32')  # 4 orientations
+                    paddle.create_parameter([64, 4], dtype='float32')  # Fix: 64->4 for orientations
                 ]
             
             model_params = adaptation_params
@@ -665,10 +665,14 @@ class PaddleOCRTrainer:
                 
                 print(f"Epoch {epoch}/{epochs} - Real PaddleOCR Fine-tuning - Loss: {avg_loss:.6f}")
                 
-                # Progress callback
+                # Progress callback (fix signature)
                 if progress_callback:
-                    progress = epoch / epochs
-                    await progress_callback(progress, f"Real PaddleOCR Fine-tuning - Epoch {epoch}/{epochs} - Loss: {avg_loss:.6f}")
+                    try:
+                        progress = epoch / epochs
+                        await progress_callback(progress, f"Real PaddleOCR Fine-tuning - Epoch {epoch}/{epochs} - Loss: {avg_loss:.6f}")
+                    except TypeError:
+                        # Handle callback signature mismatch
+                        await progress_callback(progress)
             
             training_time = time.time() - start_time
             
@@ -773,23 +777,23 @@ class PaddleOCRTrainer:
             print(f"🎯 Creating PaddleOCR adaptation parameters...")
             import paddle
             
-            # Create trainable adaptation layers
+            # Create trainable adaptation layers with correct dimensions
             if self.train_type == 'det':
                 trainable_params = [
                     paddle.create_parameter([32, 3, 3, 3], dtype='float32'),
                     paddle.create_parameter([64, 32, 3, 3], dtype='float32'),
-                    paddle.create_parameter([2, 64], dtype='float32')
+                    paddle.create_parameter([64, 2], dtype='float32')  # Fix: 64 input, 2 output
                 ]
             elif self.train_type == 'rec':
                 trainable_params = [
                     paddle.create_parameter([64, 3, 3, 3], dtype='float32'),
                     paddle.create_parameter([128, 64], dtype='float32'),
-                    paddle.create_parameter([37, 128], dtype='float32')
+                    paddle.create_parameter([128, 37], dtype='float32')  # Fix: 128 input, 37 output
                 ]
             else:
                 trainable_params = [
                     paddle.create_parameter([32, 3, 3, 3], dtype='float32'),
-                    paddle.create_parameter([4, 32], dtype='float32')
+                    paddle.create_parameter([32, 4], dtype='float32')  # Fix: 32 input, 4 output
                 ]
             
             print(f"📊 Created {len(trainable_params)} adaptation parameter groups")
@@ -837,10 +841,14 @@ class PaddleOCRTrainer:
                 
                 print(f"Epoch {epoch}/{epochs} - Direct PaddleOCR Fine-tuning - Loss: {avg_loss:.6f}")
                 
-                # Progress callback
+                # Progress callback (fix signature)
                 if progress_callback:
-                    progress = epoch / epochs
-                    await progress_callback(progress, f"Direct PaddleOCR Fine-tuning - Epoch {epoch}/{epochs}")
+                    try:
+                        progress = epoch / epochs
+                        await progress_callback(progress, f"Direct PaddleOCR Fine-tuning - Epoch {epoch}/{epochs}")
+                    except TypeError:
+                        # Handle callback signature mismatch
+                        await progress_callback(progress)
             
             training_time = time.time() - start_time
             
@@ -1035,13 +1043,13 @@ class PaddleOCRTrainer:
         import paddle.nn.functional as F
         
         # Simple adaptation network for detection
-        x = F.conv2d(images, params[0], padding=1)  # Conv1
+        x = F.conv2d(images, params[0], padding=1)  # Conv1: 3->64 channels
         x = F.relu(x)
-        x = F.conv2d(x, params[1], padding=1)       # Conv2
+        x = F.conv2d(x, params[1], padding=1)       # Conv2: 64->128 channels
         x = F.relu(x)
         x = F.adaptive_avg_pool2d(x, (1, 1))       # Global pooling
-        x = paddle.flatten(x, start_axis=1)
-        x = paddle.matmul(x, params[2])             # Final layer
+        x = paddle.flatten(x, start_axis=1)        # Shape: [batch, 128]
+        x = paddle.matmul(x, params[2])             # Final layer: 128->2
         return x
     
     def _forward_recognition_adaptation(self, params, images):
@@ -1049,13 +1057,13 @@ class PaddleOCRTrainer:
         import paddle.nn.functional as F
         
         # Simple adaptation network for recognition
-        x = F.conv2d(images, params[0], padding=1)  # Feature extraction
+        x = F.conv2d(images, params[0], padding=1)  # Feature extraction: 3->128 channels
         x = F.relu(x)
         x = F.adaptive_avg_pool2d(x, (1, 1))       # Global pooling
-        x = paddle.flatten(x, start_axis=1)
-        x = paddle.matmul(x, params[1])             # Processing
+        x = paddle.flatten(x, start_axis=1)        # Shape: [batch, 128]
+        x = paddle.matmul(x, params[1])             # Processing: 128->256
         x = F.relu(x)
-        x = paddle.matmul(x, params[2])             # Character output
+        x = paddle.matmul(x, params[2])             # Character output: 256->37
         return x
     
     def _forward_classification_adaptation(self, params, images):
@@ -1063,11 +1071,11 @@ class PaddleOCRTrainer:
         import paddle.nn.functional as F
         
         # Simple adaptation network for classification
-        x = F.conv2d(images, params[0], padding=1)  # Feature extraction
+        x = F.conv2d(images, params[0], padding=1)  # Feature extraction: 3->32 channels
         x = F.relu(x)
         x = F.adaptive_avg_pool2d(x, (1, 1))       # Global pooling
-        x = paddle.flatten(x, start_axis=1)
-        x = paddle.matmul(x, params[1])             # Classification
+        x = paddle.flatten(x, start_axis=1)        # Shape: [batch, 32]
+        x = paddle.matmul(x, params[1])             # Classification: 32->4
         return x
     
     def _process_adaptation_batch(self, params, batch_samples, train_type):
