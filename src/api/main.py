@@ -4161,14 +4161,38 @@ async def list_training_jobs_simplified():
                         job_data = json.load(f)
                 except json.JSONDecodeError as e:
                     log.warning(f"Corrupted metadata file: {metadata_file} - {e}")
-                    # Skip this job or create basic metadata
-                    job_data = {
-                        "job_id": job_dir.name,
-                        "status": "error", 
-                        "config": {},
-                        "created_at": "unknown",
-                        "error": f"Corrupted metadata file: {e}"
-                    }
+                    
+                    # Try to fix the corrupted file
+                    try:
+                        backup_file = metadata_file.with_suffix('.json.backup')
+                        metadata_file.rename(backup_file)
+                        log.info(f"Backed up corrupted file to: {backup_file}")
+                        
+                        # Create basic replacement metadata
+                        job_data = {
+                            "job_id": job_dir.name,
+                            "job_name": job_dir.name,
+                            "status": "error", 
+                            "config": {},
+                            "created_at": "unknown",
+                            "error": f"Corrupted metadata file recovered: {e}"
+                        }
+                        
+                        # Write the fixed metadata
+                        with open(metadata_file, 'w') as f:
+                            json.dump(job_data, f, indent=2)
+                        log.info(f"Created replacement metadata file: {metadata_file}")
+                        
+                    except Exception as fix_error:
+                        log.error(f"Could not fix corrupted metadata: {fix_error}")
+                        # Skip this job or create basic metadata
+                        job_data = {
+                            "job_id": job_dir.name,
+                            "status": "error", 
+                            "config": {},
+                            "created_at": "unknown",
+                            "error": f"Corrupted metadata file: {e}"
+                        }
                 except Exception as e:
                     log.error(f"Error reading metadata file {metadata_file}: {e}")
                     continue
