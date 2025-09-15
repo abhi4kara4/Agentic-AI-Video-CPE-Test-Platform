@@ -530,22 +530,18 @@ class PaddleOCRTrainer:
             # Load pre-trained PaddleOCR model for fine-tuning
             if self.train_type == 'det':
                 # Initialize detection model
-                # Fix: Remove cls parameter (not supported)
-                ocr_model = PaddleOCR(use_angle_cls=False, lang=language, 
-                                    det_model_dir=config.get('base_model_path'),
-                                    rec=False)
+                # Detection only - use minimal valid parameters
+                ocr_model = PaddleOCR(use_angle_cls=False, lang=language)
                 print(f"✅ Loaded PaddleOCR detection model for {language}")
             elif self.train_type == 'rec':
                 # Initialize recognition model
-                # Fix: Remove cls parameter (not supported)
-                ocr_model = PaddleOCR(det=False, use_angle_cls=False, lang=language,
-                                    rec_model_dir=config.get('base_model_path'))
+                # Recognition only - use minimal valid parameters
+                ocr_model = PaddleOCR(use_angle_cls=False, lang=language)
                 print(f"✅ Loaded PaddleOCR recognition model for {language}")
             else:  # cls
                 # Initialize classification model
-                # Fix: Use proper angle classification setup
-                ocr_model = PaddleOCR(det=False, rec=False, use_angle_cls=True, lang=language,
-                                    cls_model_dir=config.get('base_model_path'))
+                # Classification only - enable angle classification
+                ocr_model = PaddleOCR(use_angle_cls=True, lang=language)
                 print(f"✅ Loaded PaddleOCR classification model for {language}")
             
             # Access the actual model for fine-tuning
@@ -729,8 +725,8 @@ class PaddleOCRTrainer:
             
             # Initialize PaddleOCR to get pre-trained models
             language = config.get('language', 'en')
-            # Fix: Add use_space_char parameter
-            ocr = PaddleOCR(use_angle_cls=False, lang=language, use_space_char=False)
+            # Use minimal valid parameters
+            ocr = PaddleOCR(use_angle_cls=False, lang=language)
             
             print(f"✅ Initialized PaddleOCR with {language} language")
             
