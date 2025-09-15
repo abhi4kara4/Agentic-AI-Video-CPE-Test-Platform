@@ -778,18 +778,47 @@ class PaddleOCRTrainer:
                                             img_path = parts[0].strip()
                                             annotations = parts[1].strip() if len(parts) > 1 else ""
                                         
-                                        # Ensure image path is valid
-                                        full_img_path = self.dataset_path / 'images' / img_path
-                                        if full_img_path.exists():
+                                        # Handle different image path formats correctly
+                                        # The annotation file might have paths like:
+                                        # - "images/train_0000.jpg" (relative with images/)
+                                        # - "train_0000.jpg" (relative without images/)
+                                        
+                                        possible_paths = []
+                                        
+                                        # Try path as-is from annotation file
+                                        if img_path.startswith('images/'):
+                                            # Remove 'images/' prefix since we add it manually
+                                            img_name = img_path.replace('images/', '', 1)
+                                            possible_paths.append(self.dataset_path / 'images' / img_name)
+                                        else:
+                                            # Add 'images/' prefix
+                                            possible_paths.append(self.dataset_path / 'images' / img_path)
+                                        
+                                        # Also try direct path from dataset root
+                                        possible_paths.append(self.dataset_path / img_path)
+                                        
+                                        # Find the actual image file
+                                        full_img_path = None
+                                        for test_path in possible_paths:
+                                            if test_path.exists():
+                                                full_img_path = test_path
+                                                break
+                                        
+                                        if full_img_path and full_img_path.exists():
                                             sample = {
                                                 'image': full_img_path,
                                                 'annotations': annotations,
                                                 'text': annotations  # For recognition training
                                             }
                                             train_data.append(sample)
-                                            print(f"   ✅ Added sample {len(train_data)}: {img_path}")
+                                            print(f"   ✅ Added sample {len(train_data)}: {img_path} -> {full_img_path.name}")
                                         else:
-                                            print(f"   ⚠️  Image not found: {full_img_path}")
+                                            print(f"   ❌ Image not found at any of: {[str(p) for p in possible_paths]}")
+                                            # Show what actually exists in images directory
+                                            images_dir = self.dataset_path / 'images'
+                                            if images_dir.exists():
+                                                actual_files = [f.name for f in images_dir.iterdir() if f.is_file()][:5]
+                                                print(f"      📁 Images directory contains: {actual_files}...")
                                             
                                     except Exception as e:
                                         print(f"   ❌ Error parsing line {line_num+1}: {e}")
