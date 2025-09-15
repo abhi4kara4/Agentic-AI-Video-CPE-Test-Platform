@@ -34,6 +34,19 @@ from src.utils.logger import log
 from src.config import settings
 
 
+def safe_json_load(file_path, default=None):
+    """Safely load JSON file with error handling"""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except json.JSONDecodeError as e:
+        log.warning(f"JSON decode error in {file_path}: {e}")
+        return default if default is not None else {}
+    except Exception as e:
+        log.error(f"Error reading {file_path}: {e}")
+        return default if default is not None else {}
+
+
 def get_yolo_trainer():
     """Import YOLO trainer with production-ready error handling"""
     try:
@@ -4143,38 +4156,52 @@ async def list_training_jobs_simplified():
         if job_dir.is_dir():
             metadata_file = job_dir / "metadata.json"
             if metadata_file.exists():
-                with open(metadata_file) as f:
-                    job_data = json.load(f)
-                    
-                    # Calculate progress percentage if missing
-                    progress = job_data.get("progress", {})
-                    if "percentage" not in progress and "current_epoch" in progress and "total_epochs" in progress:
-                        current = progress.get("current_epoch", 0)
-                        total = progress.get("total_epochs", 1)
-                        progress["percentage"] = round((current / total) * 100, 1) if total > 0 else 0
-                    
-                    # Ensure config has baseModel field
-                    config = job_data.get("config", {})
-                    if "baseModel" not in config and "base_model" in job_data:
-                        config["baseModel"] = job_data["base_model"]
-                    
-                    # Use final_metrics for completed jobs if available
-                    if job_data.get("status") == "completed" and "final_metrics" in job_data:
-                        progress = job_data["final_metrics"]
-                    
-                    jobs.append({
-                        "id": job_data.get("job_name"),
-                        "modelName": job_data.get("model_name"),
-                        "datasetName": job_data.get("dataset_name"),
-                        "status": job_data.get("status", "unknown"),
-                        "startTime": job_data.get("started_at") or job_data.get("created_at"),
-                        "completedAt": job_data.get("completed_at"),
-                        "config": config,
-                        "progress": progress,
-                        "baseModel": job_data.get("base_model"),
-                        "metrics": job_data.get("final_metrics", {}),
-                        "training_results": job_data.get("training_results", {})
-                    })
+                try:
+                    with open(metadata_file) as f:
+                        job_data = json.load(f)
+                except json.JSONDecodeError as e:
+                    log.warning(f"Corrupted metadata file: {metadata_file} - {e}")
+                    # Skip this job or create basic metadata
+                    job_data = {
+                        "job_id": job_dir.name,
+                        "status": "error", 
+                        "config": {},
+                        "created_at": "unknown",
+                        "error": f"Corrupted metadata file: {e}"
+                    }
+                except Exception as e:
+                    log.error(f"Error reading metadata file {metadata_file}: {e}")
+                    continue
+                
+                # Calculate progress percentage if missing
+                progress = job_data.get("progress", {})
+                if "percentage" not in progress and "current_epoch" in progress and "total_epochs" in progress:
+                    current = progress.get("current_epoch", 0)
+                    total = progress.get("total_epochs", 1)
+                    progress["percentage"] = round((current / total) * 100, 1) if total > 0 else 0
+                
+                # Ensure config has baseModel field
+                config = job_data.get("config", {})
+                if "baseModel" not in config and "base_model" in job_data:
+                    config["baseModel"] = job_data["base_model"]
+                
+                # Use final_metrics for completed jobs if available
+                if job_data.get("status") == "completed" and "final_metrics" in job_data:
+                    progress = job_data["final_metrics"]
+                
+                jobs.append({
+                    "id": job_data.get("job_name"),
+                    "modelName": job_data.get("model_name"),
+                    "datasetName": job_data.get("dataset_name"),
+                    "status": job_data.get("status", "unknown"),
+                    "startTime": job_data.get("started_at") or job_data.get("created_at"),
+                    "completedAt": job_data.get("completed_at"),
+                    "config": config,
+                    "progress": progress,
+                    "baseModel": job_data.get("base_model"),
+                    "metrics": job_data.get("final_metrics", {}),
+                    "training_results": job_data.get("training_results", {})
+                })
     
     return {"jobs": jobs}
 
@@ -4188,8 +4215,9 @@ async def get_training_job_details(job_id: str):
     if not metadata_file.exists():
         raise HTTPException(status_code=404, detail="Training job not found")
     
-    with open(metadata_file) as f:
-        job_data = json.load(f)
+    job_data = safe_json_load(metadata_file)
+    if not job_data:
+        raise HTTPException(status_code=500, detail="Corrupted training job metadata")
     
     # Calculate progress percentage if missing
     progress = job_data.get("progress", {})
@@ -4243,8 +4271,9 @@ async def stop_training_simplified(job_id: str):
     
     metadata_file = job_dir / "metadata.json"
     if metadata_file.exists():
-        with open(metadata_file) as f:
-            job_data = json.load(f)
+        job_data = safe_json_load(metadata_file)
+        if not job_data:
+            job_data = {"job_id": job_id}  # Create minimal data if corrupted
         
         job_data["status"] = "stopped"
         job_data["stopped_at"] = datetime.now().isoformat()
@@ -4282,8 +4311,9 @@ async def resume_training_job(job_id: str):
     if not metadata_file.exists():
         raise HTTPException(status_code=404, detail="Training job metadata not found")
     
-    with open(metadata_file) as f:
-        job_data = json.load(f)
+    job_data = safe_json_load(metadata_file)
+    if not job_data:
+        raise HTTPException(status_code=500, detail="Corrupted training job metadata")
     
     if job_data.get("status") != "pending":
         raise HTTPException(status_code=400, detail="Only pending jobs can be resumed")
@@ -4313,10 +4343,8 @@ async def delete_training_job(job_id: str):
     
     metadata_file = job_dir / "metadata.json"
     if metadata_file.exists():
-        with open(metadata_file) as f:
-            job_data = json.load(f)
-        
-        if job_data.get("status") == "running":
+        job_data = safe_json_load(metadata_file)
+        if job_data and job_data.get("status") == "running":
             raise HTTPException(status_code=400, detail="Cannot delete running job. Stop it first.")
     
     # Cancel task if it exists (for safety)
