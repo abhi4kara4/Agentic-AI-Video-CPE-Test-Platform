@@ -980,6 +980,18 @@ class PaddleOCRTrainer:
                 filename = f"base_model_{self.train_type}.tar"
             
             model_file_path = models_dir / filename
+            extract_dir = models_dir / 'extracted'
+            
+            # Check if model already downloaded and extracted
+            if model_file_path.exists() and extract_dir.exists():
+                model_files = []
+                for ext in ['.pdmodel', '.pdiparams']:
+                    model_files.extend(list(extract_dir.glob(f"**/*{ext}")))
+                
+                if model_files:
+                    model_dir = model_files[0].parent
+                    print(f"🔄 Using previously downloaded model: {model_dir}")
+                    return str(model_dir)
             
             print(f"📥 Downloading to: {model_file_path}")
             
@@ -992,8 +1004,7 @@ class PaddleOCRTrainer:
             urllib.request.urlretrieve(model_cdn_url, model_file_path, show_progress)
             print()  # New line after progress
             
-            # Extract if it's an archive
-            extract_dir = models_dir / 'extracted'
+            # Extract if it's an archive (reuse extract_dir from above)
             extract_dir.mkdir(exist_ok=True)
             
             if filename.endswith('.tar') or filename.endswith('.tar.gz'):
@@ -1018,6 +1029,62 @@ class PaddleOCRTrainer:
                 model_dir = model_files[0].parent
                 print(f"✅ Base model downloaded and extracted: {model_dir}")
                 print(f"📊 Model files found: {[f.name for f in model_files]}")
+                
+                # Create missing inference.yml file if it doesn't exist
+                inference_yml = model_dir / 'inference.yml'
+                if not inference_yml.exists():
+                    print(f"📝 Creating missing inference.yml configuration file")
+                    
+                    # Create a basic inference config for PaddleOCR
+                    config_content = {
+                        'Global': {
+                            'use_gpu': False,
+                            'epoch_num': 500,
+                            'log_smooth_window': 20,
+                            'print_batch_step': 10,
+                            'save_model_dir': './output/',
+                            'save_epoch_step': 3,
+                            'eval_batch_step': [0, 400],
+                            'cal_metric_during_train': True,
+                            'pretrained_model': None,
+                            'checkpoints': None,
+                            'save_inference_dir': None,
+                            'use_visualdl': False,
+                            'infer_img': None,
+                            'save_res_path': './output/det_db/predicts_db.txt'
+                        },
+                        'Architecture': {
+                            'model_type': 'det',
+                            'algorithm': 'DB',
+                            'Transform': None,
+                            'Backbone': {
+                                'name': 'MobileNetV3',
+                                'scale': 0.5,
+                                'model_name': 'large'
+                            },
+                            'Neck': {
+                                'name': 'DBFPN',
+                                'out_channels': 256
+                            },
+                            'Head': {
+                                'name': 'DBHead',
+                                'k': 50
+                            }
+                        }
+                    }
+                    
+                    # Write YAML config
+                    if YAML_AVAILABLE:
+                        import yaml
+                        with open(inference_yml, 'w', encoding='utf-8') as f:
+                            yaml.dump(config_content, f, default_flow_style=False, allow_unicode=True)
+                    else:
+                        # Fallback to JSON if YAML not available
+                        with open(inference_yml, 'w', encoding='utf-8') as f:
+                            json.dump(config_content, f, indent=2, ensure_ascii=False)
+                    
+                    print(f"✅ Created inference.yml configuration file")
+                
                 return str(model_dir)
             else:
                 print(f"⚠️  No PaddleOCR model files found in download")
