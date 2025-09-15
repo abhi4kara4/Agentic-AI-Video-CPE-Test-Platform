@@ -186,6 +186,14 @@ class PaddleOCRTrainer:
         
         print("🔥 Attempting to use official PaddleOCR training scripts...")
         
+        # Download base model from CDN if specified
+        base_model_path = await self._download_base_model(config, training_dir)
+        if base_model_path:
+            print(f"✅ Base model downloaded and ready: {base_model_path}")
+            self.model_name = base_model_path
+        else:
+            print(f"⚠️  Using default model name: {self.model_name}")
+        
         # Prepare training config file
         config_path = self.dataset_path / 'paddleocr_config.yml'
         training_config_path = training_dir / 'training_config.yml'
@@ -304,6 +312,15 @@ class PaddleOCRTrainer:
         """Use PaddlePaddle with real PaddleOCR model loading"""
         
         print("🔥 Using PaddlePaddle with real PaddleOCR model loading...")
+        
+        # Download base model from CDN if specified
+        base_model_path = await self._download_base_model(config, training_dir)
+        if base_model_path:
+            print(f"✅ Base model downloaded and ready: {base_model_path}")
+            # Update model name to use downloaded model
+            self.model_name = base_model_path
+        else:
+            print(f"⚠️  Using default model name: {self.model_name}")
         
         # Load real PaddleOCR model
         language = config.get('language', 'en')
@@ -708,20 +725,29 @@ class PaddleOCRTrainer:
         return f"trained_models/paddleocr/{self.train_type}/{language}/{model_path.name}"
     
     def _load_training_data(self):
-        """Load training data from PaddleOCR dataset format"""
+        """Load training data from REAL PaddleOCR dataset format"""
         
         train_data = []
         
-        # Look for training annotation files
-        annotation_files = [
-            'train_data.txt',
-            'Label.txt', 
-            'annotations.json'
-        ]
+        print(f"🔍 Looking for training data for type: {self.train_type}")
+        
+        # Real PaddleOCR dataset file patterns based on training type
+        if self.train_type == 'det':
+            annotation_files = ['det_gt_train.txt', 'train_list.txt', 'det_train.txt']
+        elif self.train_type == 'rec':
+            annotation_files = ['rec_gt_train.txt', 'rec_train.txt'] 
+        else:
+            annotation_files = ['cls_gt_train.txt', 'cls_train.txt']
+        
+        # Also try generic files
+        annotation_files.extend(['train_data.txt', 'Label.txt', 'annotations.json'])
         
         for ann_file in annotation_files:
             ann_path = self.dataset_path / ann_file
+            print(f"🔍 Checking annotation file: {ann_path}")
+            
             if ann_path.exists():
+                print(f"✅ Found annotation file: {ann_file}")
                 try:
                     if ann_file.endswith('.json'):
                         with open(ann_path, 'r', encoding='utf-8') as f:
@@ -730,27 +756,153 @@ class PaddleOCRTrainer:
                                 train_data.extend(data)
                             else:
                                 train_data.append(data)
+                            print(f"📄 Loaded {len(data) if isinstance(data, list) else 1} samples from JSON")
                     else:
+                        # Read text annotation file
                         with open(ann_path, 'r', encoding='utf-8') as f:
-                            for line in f:
+                            lines = f.readlines()
+                            print(f"📄 Found {len(lines)} lines in {ann_file}")
+                            
+                            for line_num, line in enumerate(lines):
                                 line = line.strip()
-                                if line:
-                                    # PaddleOCR format: image_path\tannotations
-                                    parts = line.split('\t')
-                                    if len(parts) >= 2:
-                                        img_path = parts[0]
-                                        annotations = parts[1]
+                                if line and not line.startswith('#'):  # Skip comments
+                                    try:
+                                        # PaddleOCR format: image_path\tannotations
+                                        if '\t' in line:
+                                            parts = line.split('\t', 1)  # Split only on first tab
+                                            img_path = parts[0].strip()
+                                            annotations = parts[1].strip() if len(parts) > 1 else ""
+                                        else:
+                                            # Handle space-separated or other formats
+                                            parts = line.split(' ', 1)
+                                            img_path = parts[0].strip()
+                                            annotations = parts[1].strip() if len(parts) > 1 else ""
                                         
-                                        sample = {
-                                            'image': self.dataset_path / 'images' / img_path,
-                                            'annotations': annotations
-                                        }
-                                        train_data.append(sample)
+                                        # Ensure image path is valid
+                                        full_img_path = self.dataset_path / 'images' / img_path
+                                        if full_img_path.exists():
+                                            sample = {
+                                                'image': full_img_path,
+                                                'annotations': annotations,
+                                                'text': annotations  # For recognition training
+                                            }
+                                            train_data.append(sample)
+                                            print(f"   ✅ Added sample {len(train_data)}: {img_path}")
+                                        else:
+                                            print(f"   ⚠️  Image not found: {full_img_path}")
+                                            
+                                    except Exception as e:
+                                        print(f"   ❌ Error parsing line {line_num+1}: {e}")
+                                        print(f"   Line content: {line}")
+                                        
                 except Exception as e:
-                    print(f"⚠️  Could not load {ann_file}: {e}")
+                    print(f"❌ Could not load {ann_file}: {e}")
+                    import traceback
+                    traceback.print_exc()
+            else:
+                print(f"❌ File not found: {ann_path}")
         
         print(f"🎯 Successfully loaded {len(train_data)} real training samples for {self.train_type}")
+        
+        # If no data found, show detailed debugging info
+        if len(train_data) == 0:
+            print("🔍 DEBUGGING: No training data found. Dataset contents:")
+            try:
+                for item in self.dataset_path.iterdir():
+                    if item.is_file():
+                        print(f"   📄 File: {item.name} ({item.stat().st_size} bytes)")
+                        if item.suffix in ['.txt', '.json'] and item.stat().st_size < 10000:
+                            # Show first few lines of small text files
+                            try:
+                                with open(item, 'r', encoding='utf-8') as f:
+                                    lines = f.readlines()[:3]
+                                    print(f"      First lines: {lines}")
+                            except:
+                                pass
+                    else:
+                        print(f"   📁 Directory: {item.name}")
+            except Exception as e:
+                print(f"   ❌ Error reading dataset directory: {e}")
+        
         return train_data
+    
+    async def _download_base_model(self, config: Dict[str, Any], training_dir: Path) -> Optional[str]:
+        """Download base PaddleOCR model from CDN for fine-tuning"""
+        
+        model_cdn_url = config.get('model_cdn_url')
+        if not model_cdn_url:
+            print("⚠️  No model CDN URL provided, using default model name")
+            return None
+        
+        print(f"📥 Downloading base model from CDN: {model_cdn_url}")
+        
+        try:
+            import urllib.request
+            import urllib.parse
+            from urllib.error import URLError, HTTPError
+            import tarfile
+            import zipfile
+            
+            # Create models directory
+            models_dir = training_dir / 'base_models'
+            models_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Parse URL to get filename
+            parsed_url = urllib.parse.urlparse(model_cdn_url)
+            filename = Path(parsed_url.path).name
+            if not filename:
+                filename = f"base_model_{self.train_type}.tar"
+            
+            model_file_path = models_dir / filename
+            
+            print(f"📥 Downloading to: {model_file_path}")
+            
+            # Download with progress
+            def show_progress(block_num, block_size, total_size):
+                if total_size > 0:
+                    percent = min(100, (block_num * block_size / total_size) * 100)
+                    print(f"\r   📥 Progress: {percent:.1f}%", end='', flush=True)
+            
+            urllib.request.urlretrieve(model_cdn_url, model_file_path, show_progress)
+            print()  # New line after progress
+            
+            # Extract if it's an archive
+            extract_dir = models_dir / 'extracted'
+            extract_dir.mkdir(exist_ok=True)
+            
+            if filename.endswith('.tar') or filename.endswith('.tar.gz'):
+                print("📦 Extracting tar archive...")
+                with tarfile.open(model_file_path, 'r:*') as tar:
+                    tar.extractall(extract_dir)
+            elif filename.endswith('.zip'):
+                print("📦 Extracting zip archive...")
+                with zipfile.ZipFile(model_file_path, 'r') as zip_ref:
+                    zip_ref.extractall(extract_dir)
+            else:
+                print("📄 Using downloaded file directly")
+                extract_dir = models_dir
+            
+            # Find model files in extracted content
+            model_files = []
+            for ext in ['.pdmodel', '.pdiparams']:
+                model_files.extend(list(extract_dir.glob(f"**/*{ext}")))
+            
+            if model_files:
+                # Use directory containing model files
+                model_dir = model_files[0].parent
+                print(f"✅ Base model downloaded and extracted: {model_dir}")
+                print(f"📊 Model files found: {[f.name for f in model_files]}")
+                return str(model_dir)
+            else:
+                print(f"⚠️  No PaddleOCR model files found in download")
+                return None
+                
+        except (URLError, HTTPError) as e:
+            print(f"❌ Failed to download base model: {e}")
+            return None
+        except Exception as e:
+            print(f"❌ Error processing base model download: {e}")
+            return None
 
 
 async def train_paddleocr_model(dataset_path: str, config: Dict[str, Any], 
