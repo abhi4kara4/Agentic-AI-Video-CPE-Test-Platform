@@ -104,9 +104,10 @@ class PaddleOCRTrainer:
             print(f"🛠️  SOLUTION: The dataset needs a valid paddleocr_config.yml file")
             return False
             
-        # Count training samples
-        train_data = self._load_training_data()
-        total_samples = len(train_data) if train_data else 0
+        # Count training samples - store for later use
+        if not hasattr(self, '_cached_train_data'):
+            self._cached_train_data = self._load_training_data()
+        total_samples = len(self._cached_train_data) if self._cached_train_data else 0
         
         if total_samples == 0:
             print(f"❌ ERROR: No training samples found in dataset")
@@ -326,15 +327,38 @@ class PaddleOCRTrainer:
         
         try:
             # Initialize real PaddleOCR model with correct parameters
-            if self.train_type == 'det':
-                ocr_model = PaddleOCR(use_angle_cls=False, lang=language)
-                print("✅ Loaded real PaddleOCR detection model")
-            elif self.train_type == 'rec':
-                ocr_model = PaddleOCR(det=False, cls=False, lang=language)
-                print("✅ Loaded real PaddleOCR recognition model")
+            # Use downloaded base model if available
+            model_kwargs = {'lang': language}
+            
+            if base_model_path and Path(base_model_path).exists():
+                # Use downloaded CDN model for specific component
+                if self.train_type == 'det':
+                    model_kwargs['det_model_dir'] = base_model_path
+                    model_kwargs['use_angle_cls'] = False
+                    print(f"✅ Using downloaded detection model: {base_model_path}")
+                elif self.train_type == 'rec': 
+                    model_kwargs['rec_model_dir'] = base_model_path
+                    model_kwargs['det'] = False
+                    model_kwargs['cls'] = False
+                    print(f"✅ Using downloaded recognition model: {base_model_path}")
+                else:
+                    model_kwargs['cls_model_dir'] = base_model_path
+                    model_kwargs['det'] = False
+                    model_kwargs['rec'] = False
+                    print(f"✅ Using downloaded classification model: {base_model_path}")
             else:
-                ocr_model = PaddleOCR(det=False, rec=False, lang=language)
-                print("✅ Loaded real PaddleOCR classification model")
+                # Use default models
+                if self.train_type == 'det':
+                    model_kwargs['use_angle_cls'] = False
+                elif self.train_type == 'rec':
+                    model_kwargs['det'] = False
+                    model_kwargs['cls'] = False
+                else:
+                    model_kwargs['det'] = False
+                    model_kwargs['rec'] = False
+            
+            ocr_model = PaddleOCR(**model_kwargs)
+            print(f"✅ Loaded real PaddleOCR {self.train_type} model")
             
             # Access the actual model components
             print("🔍 Inspecting PaddleOCR model structure...")
@@ -384,10 +408,14 @@ class PaddleOCRTrainer:
             else:
                 raise Exception("Model does not have trainable parameters")
             
-            # Load training data
-            train_data = self._load_training_data()
-            if not train_data:
-                raise Exception("Failed to load training data")
+            # Use cached training data to avoid duplication
+            if hasattr(self, '_cached_train_data') and self._cached_train_data:
+                train_data = self._cached_train_data
+                print(f"📂 Using cached {len(train_data)} training samples")
+            else:
+                train_data = self._load_training_data()
+                if not train_data:
+                    raise Exception("Failed to load training data")
             
             print(f"📂 Loaded {len(train_data)} real training samples")
             
@@ -618,6 +646,8 @@ class PaddleOCRTrainer:
             
         except Exception as e:
             print(f"   ❌ Real model forward pass failed: {e}")
+            import traceback
+            print(f"   📍 Error details: {traceback.format_exc()}")
             # Return a small loss to continue training
             return paddle.to_tensor(0.01, dtype='float32')
     
