@@ -277,9 +277,10 @@ class PaddleOCRTrainer:
             return await self._real_paddleocr_training(config, progress_callback, training_dir, epochs)
                 
         except Exception as e:
-            print(f"Real PaddleOCR training failed: {e}")
-            print("Falling back to compatible training...")
-            return await self._compatible_paddle_training(config, progress_callback, training_dir, epochs, None)
+            print(f"❌ Real PaddleOCR training failed: {e}")
+            print(f"🛑 STOPPING - No fallback to compatible training")
+            print(f"🔧 Please fix the real PaddleOCR training issues above")
+            raise Exception(f"Real PaddleOCR training failed: {e}")
     
     async def _real_paddleocr_training(self, config: Dict[str, Any], progress_callback: Optional[Callable], 
                                       training_dir: Path, epochs: int) -> Dict[str, Any]:
@@ -301,7 +302,8 @@ class PaddleOCRTrainer:
                     print("✅ Found PaddleOCR library - using direct model fine-tuning")
                     return await self._direct_paddleocr_fine_tuning(config, progress_callback, training_dir, epochs)
                 except ImportError:
-                    print("⚠️  PaddleOCR library not available")
+                    print("❌ PaddleOCR library not available")
+                    raise Exception("PaddleOCR library is required for real training")
                 
                 # This section is now handled by the new fine-tuning methods above
                 raise Exception("Using new fine-tuning approach")
@@ -422,9 +424,9 @@ class PaddleOCRTrainer:
                 raise Exception("PaddleOCR training tools not found")
                 
         except Exception as e:
-            print(f"⚠️  Real PaddleOCR training failed: {e}")
-            print("Falling back to compatible training...")
-            return await self._compatible_paddle_training(config, progress_callback, training_dir, epochs, None)
+            print(f"❌ Real PaddleOCR training failed: {e}")
+            print(f"🛑 STOPPING - Fix the PaddleOCR issues above")
+            raise Exception(f"Real PaddleOCR training failed: {e}")
     
     async def _create_real_paddleocr_config(self, config: Dict[str, Any], training_dir: Path) -> Dict[str, Any]:
         """Create real PaddleOCR training configuration"""
@@ -528,18 +530,21 @@ class PaddleOCRTrainer:
             # Load pre-trained PaddleOCR model for fine-tuning
             if self.train_type == 'det':
                 # Initialize detection model
+                # Fix: Remove cls parameter (not supported)
                 ocr_model = PaddleOCR(use_angle_cls=False, lang=language, 
                                     det_model_dir=config.get('base_model_path'),
-                                    rec=False, cls=False)
+                                    rec=False)
                 print(f"✅ Loaded PaddleOCR detection model for {language}")
             elif self.train_type == 'rec':
                 # Initialize recognition model
-                ocr_model = PaddleOCR(det=False, cls=False, lang=language,
+                # Fix: Remove cls parameter (not supported)
+                ocr_model = PaddleOCR(det=False, use_angle_cls=False, lang=language,
                                     rec_model_dir=config.get('base_model_path'))
                 print(f"✅ Loaded PaddleOCR recognition model for {language}")
             else:  # cls
                 # Initialize classification model
-                ocr_model = PaddleOCR(det=False, rec=False, lang=language,
+                # Fix: Use proper angle classification setup
+                ocr_model = PaddleOCR(det=False, rec=False, use_angle_cls=True, lang=language,
                                     cls_model_dir=config.get('base_model_path'))
                 print(f"✅ Loaded PaddleOCR classification model for {language}")
             
@@ -705,9 +710,10 @@ class PaddleOCRTrainer:
             
         except Exception as e:
             print(f"❌ Real PaddleOCR fine-tuning failed: {e}")
+            print(f"🛑 STOPPING - Fix the PaddleOCR fine-tuning issues above")
             import traceback
             traceback.print_exc()
-            raise e
+            raise Exception(f"PaddleOCR fine-tuning failed: {e}")
     
     async def _direct_paddleocr_fine_tuning(self, config: Dict[str, Any], progress_callback: Optional[Callable], 
                                            training_dir: Path, epochs: int) -> Dict[str, Any]:
@@ -723,7 +729,8 @@ class PaddleOCRTrainer:
             
             # Initialize PaddleOCR to get pre-trained models
             language = config.get('language', 'en')
-            ocr = PaddleOCR(use_angle_cls=False, lang=language)
+            # Fix: Add use_space_char parameter
+            ocr = PaddleOCR(use_angle_cls=False, lang=language, use_space_char=False)
             
             print(f"✅ Initialized PaddleOCR with {language} language")
             
@@ -852,7 +859,8 @@ class PaddleOCRTrainer:
             
         except Exception as e:
             print(f"❌ Direct PaddleOCR fine-tuning failed: {e}")
-            raise e
+            print(f"🛑 STOPPING - Fix the direct PaddleOCR issues above")
+            raise Exception(f"Direct PaddleOCR fine-tuning failed: {e}")
     
     def _prepare_paddleocr_batch(self, batch_samples):
         """Prepare batch data for PaddleOCR model training"""
