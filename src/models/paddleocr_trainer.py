@@ -551,7 +551,7 @@ class PaddleOCRTrainer:
         
         try:
             # REAL forward pass through the actual PaddleOCR model
-            model.eval()  # Set to evaluation mode for inference
+            model.train()  # Set to training mode for gradient computation
             
             if train_type == 'det':
                 # Real detection model forward pass
@@ -757,6 +757,10 @@ class PaddleOCRTrainer:
             
             if ann_path.exists():
                 print(f"✅ Found annotation file: {ann_file}")
+                # Skip if we already have data to avoid duplicates
+                if len(train_data) > 0:
+                    print(f"   ⏭️  Skipping {ann_file} - already have {len(train_data)} samples")
+                    continue
                 try:
                     if ann_file.endswith('.json'):
                         with open(ann_path, 'r', encoding='utf-8') as f:
@@ -920,7 +924,8 @@ class PaddleOCRTrainer:
     async def _download_base_model(self, config: Dict[str, Any], training_dir: Path) -> Optional[str]:
         """Download base PaddleOCR model from CDN for fine-tuning"""
         
-        model_cdn_url = config.get('model_cdn_url')
+        # Check for both possible field names
+        model_cdn_url = config.get('model_cdn_url') or config.get('cdnUrl') or config.get('cdn_url')
         if not model_cdn_url:
             print("⚠️  No model CDN URL provided, using default model name")
             return None
