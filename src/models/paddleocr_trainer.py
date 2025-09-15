@@ -191,7 +191,35 @@ class PaddleOCRTrainer:
         base_model_path = await self._download_base_model(config, training_dir)
         if base_model_path:
             print(f"✅ Base model downloaded and ready: {base_model_path}")
-            self.model_name = base_model_path
+            # Extract the actual model name from the downloaded path for compatibility
+            downloaded_model_name = Path(base_model_path).name
+            print(f"🔧 Detected downloaded model name: {downloaded_model_name}")
+            
+            # Use the exact downloaded model name as the model identifier
+            # This ensures model name matches the actual downloaded model
+            if "Multilingual_PP-OCRv3" in downloaded_model_name:
+                # For CDN models, use the exact name pattern that matches the download
+                self.model_name = downloaded_model_name
+                print(f"🎯 Using exact CDN model name: {self.model_name}")
+            elif "PP-OCRv3" in downloaded_model_name:
+                if self.train_type == 'det':
+                    self.model_name = "ch_PP-OCRv3_det"
+                elif self.train_type == 'rec':
+                    self.model_name = "ch_PP-OCRv3_rec"
+                else:
+                    self.model_name = "ch_PP-OCRv3_cls"
+            elif "PP-OCRv4" in downloaded_model_name:
+                if self.train_type == 'det':
+                    self.model_name = "ch_PP-OCRv4_det"
+                elif self.train_type == 'rec':
+                    self.model_name = "ch_PP-OCRv4_rec"
+                else:
+                    self.model_name = "ch_PP-OCRv4_cls"
+            else:
+                # For unknown models, try to use the downloaded name directly
+                self.model_name = downloaded_model_name
+            
+            print(f"🔧 Using compatible model name: {self.model_name}")
         else:
             print(f"⚠️  Using default model name: {self.model_name}")
         
@@ -316,8 +344,35 @@ class PaddleOCRTrainer:
         base_model_path = await self._download_base_model(config, training_dir)
         if base_model_path:
             print(f"✅ Base model downloaded and ready: {base_model_path}")
-            # Update model name to use downloaded model
-            self.model_name = base_model_path
+            # Extract the actual model name from the downloaded path for compatibility
+            downloaded_model_name = Path(base_model_path).name
+            print(f"🔧 Detected downloaded model name: {downloaded_model_name}")
+            
+            # Use the exact downloaded model name as the model identifier
+            # This ensures model name matches the actual downloaded model
+            if "Multilingual_PP-OCRv3" in downloaded_model_name:
+                # For CDN models, use the exact name pattern that matches the download
+                self.model_name = downloaded_model_name
+                print(f"🎯 Using exact CDN model name: {self.model_name}")
+            elif "PP-OCRv3" in downloaded_model_name:
+                if self.train_type == 'det':
+                    self.model_name = "ch_PP-OCRv3_det"
+                elif self.train_type == 'rec':
+                    self.model_name = "ch_PP-OCRv3_rec"
+                else:
+                    self.model_name = "ch_PP-OCRv3_cls"
+            elif "PP-OCRv4" in downloaded_model_name:
+                if self.train_type == 'det':
+                    self.model_name = "ch_PP-OCRv4_det"
+                elif self.train_type == 'rec':
+                    self.model_name = "ch_PP-OCRv4_rec"
+                else:
+                    self.model_name = "ch_PP-OCRv4_cls"
+            else:
+                # For unknown models, try to use the downloaded name directly
+                self.model_name = downloaded_model_name
+            
+            print(f"🔧 Using compatible model name: {self.model_name}")
         else:
             print(f"⚠️  Using default model name: {self.model_name}")
         
