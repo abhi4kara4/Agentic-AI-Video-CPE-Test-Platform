@@ -334,14 +334,14 @@ class PaddleOCRTrainer:
         
         raise Exception("All PaddleOCR training scripts failed")
     
-    async def _use_paddle_with_real_model(self, config: Dict[str, Any], progress_callback: Optional[Callable], 
+    async def _use_paddle_with_real_model(self, training_config: Dict[str, Any], progress_callback: Optional[Callable], 
                                         training_dir: Path, epochs: int) -> Dict[str, Any]:
         """Use PaddlePaddle with real PaddleOCR model loading"""
         
         print("🔥 Using PaddlePaddle with real PaddleOCR model loading...")
         
         # Download base model from CDN if specified
-        base_model_path = await self._download_base_model(config, training_dir)
+        base_model_path = await self._download_base_model(training_config, training_dir)
         if base_model_path:
             print(f"✅ Base model downloaded and ready: {base_model_path}")
             # Extract the actual model name from the downloaded path for compatibility
@@ -377,7 +377,7 @@ class PaddleOCRTrainer:
             print(f"⚠️  Using default model name: {self.model_name}")
         
         # Load real PaddleOCR model
-        language = config.get('language', 'en')
+        language = training_config.get('language', 'en')
         print(f"🌍 Loading PaddleOCR model for language: {language}")
         
         try:
@@ -401,15 +401,15 @@ class PaddleOCRTrainer:
             import paddle.inference as paddle_infer
             
             # Configure paddle inference
-            config = paddle_infer.Config(str(pdmodel_file), str(pdiparams_file))
-            config.enable_use_gpu(100, 0) if paddle.is_compiled_with_cuda() else config.disable_gpu()
-            config.disable_glog_info()
-            config.switch_ir_optim(True)
-            config.switch_use_feed_fetch_ops(False)
-            config.switch_specify_input_names(True)
+            paddle_config = paddle_infer.Config(str(pdmodel_file), str(pdiparams_file))
+            paddle_config.enable_use_gpu(100, 0) if paddle.is_compiled_with_cuda() else paddle_config.disable_gpu()
+            paddle_config.disable_glog_info()
+            paddle_config.switch_ir_optim(True)
+            paddle_config.switch_use_feed_fetch_ops(False)
+            paddle_config.switch_specify_input_names(True)
             
             # Create predictor (this is the real model)
-            predictor = paddle_infer.create_predictor(config)
+            predictor = paddle_infer.create_predictor(paddle_config)
             
             print(f"✅ Successfully loaded {self.train_type} model with Paddle Inference")
             print(f"📊 Model input names: {predictor.get_input_names()}")
@@ -519,14 +519,14 @@ class PaddleOCRTrainer:
             print(f"📂 Loaded {len(train_data)} real training samples")
             
             # Set up real optimizer with actual model parameters
-            learning_rate = config.get('learning_rate', 0.001)
+            learning_rate = training_config.get('learning_rate', 0.001)
             optimizer = paddle.optimizer.Adam(learning_rate=learning_rate, parameters=model_params)
             print(f"⚙️  Set up optimizer with LR: {learning_rate}")
             
             # REAL training loop with actual PaddleOCR model
             print(f"🔥 Starting REAL fine-tuning for {epochs} epochs...")
             
-            batch_size = config.get('batch_size', 8)
+            batch_size = training_config.get('batch_size', 8)
             num_batches = max(1, len(train_data) // batch_size)
             
             for epoch in range(1, epochs + 1):
