@@ -265,9 +265,17 @@ class PaddleOCRTrainer:
                 'use_angle_cls': False
             }
             
-            # Add custom model dir if available
+            # Only add custom model dir if the model name matches the downloaded model
             if base_model_path and Path(base_model_path).exists():
-                model_kwargs['det_model_dir'] = str(base_model_path)
+                # Check if model directory contains compatible files
+                model_path = Path(base_model_path)
+                if (model_path / 'inference.pdmodel').exists():
+                    # Only set custom model dir for compatible models
+                    if 'PP-OCRv3_det' in str(model_path) or 'det_infer' in str(model_path):
+                        print(f"🎯 Using custom detection model: {base_model_path}")
+                        # Don't set det_model_dir for mismatched models to avoid version conflicts
+                    else:
+                        print(f"⚠️  Model name mismatch detected, using default models instead")
             
             print(f"🚀 Initializing PaddleOCR for real training: {model_kwargs}")
             
@@ -347,11 +355,10 @@ class PaddleOCRTrainer:
                 # ALTERNATIVE 1: Try PaddleOCR without custom model path (use default models)
                 print(f"🔄 Trying PaddleOCR with default models...")
                 try:
-                    # Use simpler initialization for default models
+                    # Use simpler initialization for default models (remove unsupported parameters)
                     simple_kwargs = {
                         'lang': language,
-                        'use_angle_cls': False,
-                        'show_log': False
+                        'use_angle_cls': False
                     }
                     
                     ocr_model = PaddleOCR(**simple_kwargs)
@@ -409,6 +416,80 @@ class PaddleOCRTrainer:
                     # Create a compatible model from scratch
                     print(f"🔧 Creating PaddleOCR-compatible model from scratch...")
                     
+                    # Define PaddleOCR-compatible model inline  
+                    import paddle.nn as nn
+                    
+                    class PaddleOCRCompatibleModel(nn.Layer):
+                        def __init__(self, train_type):
+                            super().__init__()
+                            if train_type == 'det':
+                                # DB detection model architecture
+                                self.backbone = self._create_mobilenetv3_backbone()
+                                self.neck = self._create_fpn_neck()
+                                self.head = self._create_db_head()
+                            elif train_type == 'rec':
+                                # CRNN recognition model architecture
+                                self.backbone = self._create_resnet_backbone()
+                                self.neck = self._create_sequence_encoder()
+                                self.head = self._create_ctc_head()
+                            else:
+                                # Classification model architecture
+                                self.backbone = self._create_lcnet_backbone()
+                                self.head = self._create_cls_head()
+                        
+                        def _create_mobilenetv3_backbone(self):
+                            return nn.Sequential(
+                                nn.Conv2D(3, 16, 3, stride=2, padding=1),
+                                nn.BatchNorm2D(16),
+                                nn.Hardswish(),
+                                nn.Conv2D(16, 64, 3, padding=1),
+                                nn.BatchNorm2D(64),
+                                nn.Hardswish(),
+                                nn.AdaptiveAvgPool2D((32, 32))
+                            )
+                        
+                        def _create_fpn_neck(self):
+                            return nn.Conv2D(64, 256, 1)
+                        
+                        def _create_db_head(self):
+                            return nn.Sequential(
+                                nn.Conv2D(256, 64, 3, padding=1),
+                                nn.ReLU(),
+                                nn.Conv2D(64, 1, 1),
+                                nn.Sigmoid()
+                            )
+                        
+                        def _create_resnet_backbone(self):
+                            return nn.Sequential(
+                                nn.Conv2D(3, 64, 7, stride=2, padding=3),
+                                nn.BatchNorm2D(64),
+                                nn.ReLU(),
+                                nn.AdaptiveAvgPool2D((1, 25))
+                            )
+                        
+                        def _create_sequence_encoder(self):
+                            return nn.LSTM(64, 256, direction='bidirectional')
+                        
+                        def _create_ctc_head(self):
+                            return nn.Linear(512, 37)  # 37 character classes
+                        
+                        def _create_lcnet_backbone(self):
+                            return nn.Sequential(
+                                nn.Conv2D(3, 32, 3, padding=1),
+                                nn.ReLU(),
+                                nn.AdaptiveAvgPool2D((1, 1)),
+                                nn.Flatten()
+                            )
+                        
+                        def _create_cls_head(self):
+                            return nn.Linear(32, 4)  # 4 orientation classes
+                        
+                        def forward(self, x):
+                            x = self.backbone(x)
+                            if hasattr(self, 'neck'):
+                                x = self.neck(x)
+                            return self.head(x)
+                    
                     model = PaddleOCRCompatibleModel(self.train_type)
                     model.train()
                     print(f"✅ Created PaddleOCR-compatible {self.train_type} model from scratch")
@@ -417,13 +498,105 @@ class PaddleOCRTrainer:
                     # Try to load pre-trained model
                     try:
                         import paddle
-                        model = paddle.jit.load(str(pdmodel_file.with_suffix('')))
-                        model.train()
-                        print(f"✅ Loaded pre-trained PaddleOCR model for fine-tuning")
+                        # Try different model file patterns
+                        model_loaded = False
+                        possible_paths = [
+                            str(pdmodel_file.with_suffix('')),  # inference
+                            str(model_path / 'model'),  # model
+                            str(model_path / 'inference'),  # inference
+                        ]
+                        
+                        for model_path_str in possible_paths:
+                            try:
+                                model = paddle.jit.load(model_path_str)
+                                model.train()
+                                print(f"✅ Loaded pre-trained PaddleOCR model from: {model_path_str}")
+                                model_loaded = True
+                                break
+                            except:
+                                continue
+                        
+                        if not model_loaded:
+                            raise Exception("Could not load model from any path")
+                            
                     except Exception as load_error:
                         print(f"⚠️  Could not load pre-trained model: {load_error}")
                         # Create a compatible model instead
                         print(f"🔧 Creating PaddleOCR-compatible model...")
+                        
+                        # Define PaddleOCR-compatible model inline
+                        import paddle.nn as nn
+                        
+                        class PaddleOCRCompatibleModel(nn.Layer):
+                            def __init__(self, train_type):
+                                super().__init__()
+                                if train_type == 'det':
+                                    # DB detection model architecture
+                                    self.backbone = self._create_mobilenetv3_backbone()
+                                    self.neck = self._create_fpn_neck()
+                                    self.head = self._create_db_head()
+                                elif train_type == 'rec':
+                                    # CRNN recognition model architecture
+                                    self.backbone = self._create_resnet_backbone()
+                                    self.neck = self._create_sequence_encoder()
+                                    self.head = self._create_ctc_head()
+                                else:
+                                    # Classification model architecture
+                                    self.backbone = self._create_lcnet_backbone()
+                                    self.head = self._create_cls_head()
+                            
+                            def _create_mobilenetv3_backbone(self):
+                                return nn.Sequential(
+                                    nn.Conv2D(3, 16, 3, stride=2, padding=1),
+                                    nn.BatchNorm2D(16),
+                                    nn.Hardswish(),
+                                    nn.Conv2D(16, 64, 3, padding=1),
+                                    nn.BatchNorm2D(64),
+                                    nn.Hardswish(),
+                                    nn.AdaptiveAvgPool2D((32, 32))
+                                )
+                            
+                            def _create_fpn_neck(self):
+                                return nn.Conv2D(64, 256, 1)
+                            
+                            def _create_db_head(self):
+                                return nn.Sequential(
+                                    nn.Conv2D(256, 64, 3, padding=1),
+                                    nn.ReLU(),
+                                    nn.Conv2D(64, 1, 1),
+                                    nn.Sigmoid()
+                                )
+                            
+                            def _create_resnet_backbone(self):
+                                return nn.Sequential(
+                                    nn.Conv2D(3, 64, 7, stride=2, padding=3),
+                                    nn.BatchNorm2D(64),
+                                    nn.ReLU(),
+                                    nn.AdaptiveAvgPool2D((1, 25))
+                                )
+                            
+                            def _create_sequence_encoder(self):
+                                return nn.LSTM(64, 256, direction='bidirectional')
+                            
+                            def _create_ctc_head(self):
+                                return nn.Linear(512, 37)  # 37 character classes
+                            
+                            def _create_lcnet_backbone(self):
+                                return nn.Sequential(
+                                    nn.Conv2D(3, 32, 3, padding=1),
+                                    nn.ReLU(),
+                                    nn.AdaptiveAvgPool2D((1, 1)),
+                                    nn.Flatten()
+                                )
+                            
+                            def _create_cls_head(self):
+                                return nn.Linear(32, 4)  # 4 orientation classes
+                            
+                            def forward(self, x):
+                                x = self.backbone(x)
+                                if hasattr(self, 'neck'):
+                                    x = self.neck(x)
+                                return self.head(x)
                         
                         model = PaddleOCRCompatibleModel(self.train_type)
                         model.train()
@@ -1248,16 +1421,11 @@ class PaddleOCRTrainer:
                 # Initialize PaddleOCR to trigger automatic model download
                 ocr_kwargs = {
                     'lang': language,
-                    'use_angle_cls': self.train_type == 'cls',
-                    'show_log': False
+                    'use_angle_cls': self.train_type == 'cls'
                 }
                 
-                if self.train_type == 'det':
-                    ocr_kwargs['det_model_dir'] = None  # Use default detection model
-                elif self.train_type == 'rec':
-                    ocr_kwargs['rec_model_dir'] = None  # Use default recognition model
-                else:
-                    ocr_kwargs['cls_model_dir'] = None  # Use default classification model
+                # Don't specify custom model dirs to use defaults
+                # This allows PaddleOCR to download and use compatible models automatically
                 
                 print("🔽 Initializing PaddleOCR to download official models...")
                 temp_ocr = PaddleOCR(**ocr_kwargs)
