@@ -416,20 +416,26 @@ class PaddleOCRTrainer:
             print(f"🚀 Initializing PaddleOCR with direct model loading (bypassing PaddleX)")
             print(f"🔧 Model kwargs: {model_kwargs}")
             
-            # Add parameters to bypass PaddleX auto-model creation
-            model_kwargs['use_pdserving'] = False
-            model_kwargs['warmup'] = False
+            # Try to initialize PaddleOCR with minimal parameters to avoid version issues
+            print(f"🎯 Attempting PaddleOCR initialization with core parameters only")
             
             try:
                 ocr_model = PaddleOCR(**model_kwargs)
                 print(f"✅ Loaded real PaddleOCR {self.train_type} model successfully")
             except Exception as paddleocr_error:
                 print(f"❌ PaddleOCR initialization failed: {paddleocr_error}")
-                # This is likely the PaddleX model mismatch issue
-                if "Model name mismatch" in str(paddleocr_error):
+                
+                # Check for specific error types and provide detailed solutions
+                error_str = str(paddleocr_error)
+                
+                if "Model name mismatch" in error_str:
                     raise Exception(f"PaddleOCR model initialization failed due to PaddleX trying to use incompatible model 'PP-OCRv5_server_det' with downloaded '{Path(base_model_path).name}'. This is a real PaddleX/PaddleOCR integration issue. Solution: 1) Use a compatible PaddleOCR model that matches PaddleX expectations, 2) Downgrade to PaddleOCR without PaddleX integration, or 3) Use a different model from CDN that's compatible with PaddleX.")
+                elif "Unknown argument" in error_str:
+                    raise Exception(f"PaddleOCR parameter compatibility issue: {paddleocr_error}. The PaddleOCR version doesn't support some parameters. This is a real environment issue that needs to be fixed by using compatible parameters or updating PaddleOCR version.")
+                elif "No such file or directory" in error_str:
+                    raise Exception(f"PaddleOCR model file loading failed: {paddleocr_error}. The downloaded model files from CDN are missing or corrupted. This is a real model file issue.")
                 else:
-                    raise Exception(f"PaddleOCR model loading failed: {paddleocr_error}. Real training requires working PaddleOCR model initialization.")
+                    raise Exception(f"PaddleOCR model loading failed: {paddleocr_error}. Real training requires working PaddleOCR model initialization. Check PaddleOCR installation and model compatibility.")
             
             # Access the actual model components
             print("🔍 Inspecting PaddleOCR model structure...")
