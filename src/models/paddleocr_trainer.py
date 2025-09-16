@@ -381,157 +381,95 @@ class PaddleOCRTrainer:
         print(f"🌍 Loading PaddleOCR model for language: {language}")
         
         try:
-            # REAL FIX: Use direct paddle inference without PaddleOCR wrapper
-            # This bypasses the PaddleX integration issue completely
-            print(f"🔧 REAL FIX: Loading model directly with Paddle Inference (bypassing PaddleOCR wrapper)")
+            # GENUINE FIX: Use real PaddleOCR training instead of inference wrappers
+            print(f"🔧 GENUINE FIX: Using real PaddleOCR training with actual model fine-tuning")
             
-            if not base_model_path or not Path(base_model_path).exists():
-                raise Exception("No base model provided from CDN. Real training requires a base model to fine-tune.")
+            # Initialize PaddleOCR for real training (not inference)
+            # Use the downloaded model as the base for fine-tuning
+            if base_model_path and Path(base_model_path).exists():
+                model_kwargs = {
+                    'lang': language,
+                    'det_model_dir': str(base_model_path),
+                    'use_angle_cls': False,
+                    'rec': False,  # Only detection training
+                    'cls': False
+                }
+            else:
+                # Use default model if no base model
+                model_kwargs = {
+                    'lang': language,
+                    'use_angle_cls': False,
+                    'rec': False,
+                    'cls': False
+                }
             
-            model_path = Path(base_model_path)
-            pdmodel_file = model_path / 'inference.pdmodel'
-            pdiparams_file = model_path / 'inference.pdiparams'
+            print(f"🚀 Initializing PaddleOCR for real training: {model_kwargs}")
             
-            if not (pdmodel_file.exists() and pdiparams_file.exists()):
-                raise Exception(f"Model files missing: {pdmodel_file} or {pdiparams_file} not found.")
-            
-            print(f"✅ Found model files: {pdmodel_file.name}, {pdiparams_file.name}")
-            
-            # Use direct paddle inference to load the model
-            import paddle.inference as paddle_infer
-            
-            # Configure paddle inference
-            paddle_config = paddle_infer.Config(str(pdmodel_file), str(pdiparams_file))
-            paddle_config.enable_use_gpu(100, 0) if paddle.is_compiled_with_cuda() else paddle_config.disable_gpu()
-            paddle_config.disable_glog_info()
-            paddle_config.switch_ir_optim(True)
-            paddle_config.switch_use_feed_fetch_ops(False)
-            paddle_config.switch_specify_input_names(True)
-            
-            # Create predictor (this is the real model)
-            predictor = paddle_infer.create_predictor(paddle_config)
-            
-            print(f"✅ Successfully loaded {self.train_type} model with Paddle Inference")
-            print(f"📊 Model input names: {predictor.get_input_names()}")
-            print(f"📊 Model output names: {predictor.get_output_names()}")
-            
-            # Create a wrapper object that mimics PaddleOCR structure
-            class DirectPaddleModel:
-                def __init__(self, predictor, model_type):
-                    self.predictor = predictor
-                    self.model_type = model_type
-                    self.input_names = predictor.get_input_names()
-                    self.output_names = predictor.get_output_names()
-                
-                def parameters(self):
-                    # For training purposes, we need to extract parameters
-                    # This is a simplified approach - in real training you'd need
-                    # to properly extract and manage the model parameters
-                    return []
-                
-                def train(self):
-                    # Set to training mode
-                    pass
-                
-                def forward(self, inputs):
-                    # Convert paddle tensor to numpy for inference
-                    if hasattr(inputs, 'numpy'):
-                        numpy_inputs = inputs.numpy()
-                    else:
-                        numpy_inputs = inputs
-                    
-                    # Run inference
-                    input_handle = self.predictor.get_input_handle(self.input_names[0])
-                    input_handle.copy_from_cpu(numpy_inputs)
-                    self.predictor.run()
-                    
-                    output_handle = self.predictor.get_output_handle(self.output_names[0])
-                    output_numpy = output_handle.copy_to_cpu()
-                    
-                    # Convert back to paddle tensor for training
-                    return paddle.to_tensor(output_numpy)
-                
-                def __call__(self, inputs):
-                    return self.forward(inputs)
-            
-            ocr_model = DirectPaddleModel(predictor, self.train_type)
-            print(f"✅ Created direct paddle model wrapper for {self.train_type} training")
-            
-            # Access the actual model components - our direct paddle model
-            print("🔍 Inspecting Direct Paddle model structure...")
-            model = ocr_model  # Use our direct paddle model wrapper
-            
-            print(f"🎯 Using direct Paddle inference model: {type(model)}")
-            print(f"📊 Model type: {model.model_type}")
-            print(f"📊 Input names: {model.input_names}")
-            print(f"📊 Output names: {model.output_names}")
-            
-            # For real training, we need access to the actual model parameters
-            # Since we're using inference model, we need to load the trainable version
-            print(f"🔄 Loading trainable version of the model for fine-tuning...")
-            
-            # Load the model in training mode
+            # This will trigger PaddleX issues, but we'll handle them properly
             try:
-                # Use paddle.jit.load to get the trainable model
+                ocr_model = PaddleOCR(**model_kwargs)
+                print(f"✅ PaddleOCR initialized successfully")
+                
+                # Extract the actual detection model for training
+                if hasattr(ocr_model, 'text_detector'):
+                    det_model = ocr_model.text_detector
+                    print(f"✅ Found text_detector: {type(det_model)}")
+                    
+                    # Get the actual neural network model
+                    if hasattr(det_model, 'predictor') and hasattr(det_model.predictor, 'net'):
+                        actual_model = det_model.predictor.net
+                        print(f"✅ Found actual model: {type(actual_model)}")
+                    elif hasattr(det_model, 'model'):
+                        actual_model = det_model.model
+                        print(f"✅ Found model: {type(actual_model)}")
+                    else:
+                        raise Exception("Cannot find trainable model in PaddleOCR detector")
+                    
+                    # Use the actual model for training
+                    model = actual_model
+                    model.train()  # Set to training mode
+                    
+                    # Get model parameters
+                    model_params = list(model.parameters())
+                    print(f"📊 Real PaddleOCR model has {len(model_params)} parameter groups")
+                    total_params = sum(p.numel() for p in model_params if hasattr(p, 'numel'))
+                    print(f"📊 Total trainable parameters: {total_params:,}")
+                    
+                else:
+                    raise Exception("PaddleOCR text_detector not found")
+                    
+            except Exception as paddleocr_error:
+                print(f"❌ PaddleOCR initialization failed: {paddleocr_error}")
+                
+                # ALTERNATIVE: Use pure Paddle model training
+                print(f"🔄 Falling back to pure Paddle model training...")
+                
+                if not base_model_path or not Path(base_model_path).exists():
+                    raise Exception("No base model available for pure Paddle training")
+                
+                model_path = Path(base_model_path)
+                pdmodel_file = model_path / 'inference.pdmodel'
+                pdiparams_file = model_path / 'inference.pdiparams'
+                
+                if not (pdmodel_file.exists() and pdiparams_file.exists()):
+                    raise Exception(f"Model files missing: {pdmodel_file} or {pdiparams_file}")
+                
+                # Load model using paddle.jit.load for training
                 model_prefix = str(pdmodel_file).replace('.pdmodel', '')
-                trainable_model = paddle.jit.load(model_prefix)
-                trainable_model.train()  # Set to training mode
                 
-                print(f"✅ Loaded trainable model from: {model_prefix}")
-                
-                # Get model parameters for training
-                model_params = list(trainable_model.parameters())
-                print(f"📊 Trainable model has {len(model_params)} parameter groups")
-                total_params = sum(p.numel() for p in model_params if hasattr(p, 'numel'))
-                print(f"📊 Total trainable parameters: {total_params:,}")
-                
-                # Use the trainable model for training
-                model = trainable_model
-                
-            except Exception as load_error:
-                print(f"⚠️  Could not load trainable model: {load_error}")
-                print(f"🔄 Attempting to create trainable model from inference model...")
-                
-                # Alternative: Create a simple trainable model based on the inference model structure
-                # This is a simplified approach for demonstration
-                import paddle.nn as nn
-                
-                class TrainableOCRModel(nn.Layer):
-                    def __init__(self, inference_model):
-                        super().__init__()
-                        self.inference_model = inference_model
-                        self.adaptation_layer = None  # Initialize later after getting actual dimensions
-                        
-                    def forward(self, x):
-                        # Run through inference model (frozen)
-                        with paddle.no_grad():
-                            features = self.inference_model(x)
-                        
-                        # Initialize adaptation layer with correct dimensions on first forward pass
-                        if self.adaptation_layer is None:
-                            # Get the actual feature dimensions from the inference model output
-                            if len(features.shape) > 2:
-                                # Flatten multi-dimensional outputs
-                                feature_dim = features.shape[-1] if len(features.shape) > 1 else features.numel()
-                                features = paddle.flatten(features, start_axis=1)
-                            else:
-                                feature_dim = features.shape[-1]
-                            
-                            print(f"🔧 Auto-detected feature dimensions: {feature_dim}")
-                            self.adaptation_layer = paddle.nn.Linear(feature_dim, feature_dim)
-                            
-                        # Flatten features if needed for the linear layer
-                        if len(features.shape) > 2:
-                            features = paddle.flatten(features, start_axis=1)
-                            
-                        # Apply trainable adaptation
-                        return self.adaptation_layer(features)
-                
-                model = TrainableOCRModel(ocr_model)
-                model_params = list(model.parameters())
-                print(f"📊 Created trainable wrapper with {len(model_params)} parameter groups")
-                total_params = sum(p.numel() for p in model_params if hasattr(p, 'numel'))
-                print(f"📊 Total trainable parameters: {total_params:,}")
+                try:
+                    model = paddle.jit.load(model_prefix)
+                    model.train()
+                    print(f"✅ Loaded Paddle model for training: {model_prefix}")
+                    
+                    model_params = list(model.parameters())
+                    total_params = sum(p.numel() for p in model_params if hasattr(p, 'numel'))
+                    print(f"📊 Paddle model has {len(model_params)} parameter groups")
+                    print(f"📊 Total trainable parameters: {total_params:,}")
+                    
+                except Exception as jit_error:
+                    print(f"❌ Paddle jit.load failed: {jit_error}")
+                    raise Exception(f"Cannot load model for training. PaddleOCR failed: {paddleocr_error}. Paddle jit.load failed: {jit_error}. Real training requires a working model.")
             
             # Use cached training data to avoid duplication
             if hasattr(self, '_cached_train_data') and self._cached_train_data:
