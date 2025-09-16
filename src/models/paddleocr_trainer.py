@@ -767,6 +767,15 @@ class PaddleOCRTrainer:
             batch_size = training_config.get('batch_size', 8)
             num_batches = max(1, len(train_data) // batch_size)
             
+            print(f"📊 Training configuration:")
+            print(f"   • Dataset size: {len(train_data)} samples")
+            print(f"   • Batch size: {batch_size}")
+            print(f"   • Number of batches per epoch: {num_batches}")
+            print(f"   • Samples per batch: {min(batch_size, len(train_data))}")
+            if len(train_data) % batch_size != 0:
+                remaining = len(train_data) % batch_size
+                print(f"   • Last batch will have {remaining} samples")
+            
             for epoch in range(1, epochs + 1):
                 epoch_loss = 0.0
                 
@@ -851,10 +860,10 @@ class PaddleOCRTrainer:
                 "status": "completed",
                 "training_time": training_time,
                 "epochs_completed": epochs,
-                "final_loss": avg_loss,
+                "final_loss": float(avg_loss),  # Convert tensor to float for JSON serialization
                 "model_path": str(trained_model_path),
                 "model_size_mb": trained_model_path.stat().st_size / (1024 * 1024),
-                "total_parameters": total_params,
+                "total_parameters": int(total_params),  # Ensure it's an int
                 "training_method": "real_paddleocr_model"
             }
             
@@ -1029,26 +1038,46 @@ class PaddleOCRTrainer:
         actual_model_files = []
         model_base = model_file.with_suffix('')
         
-        # Check for different possible model file extensions
-        possible_extensions = ['.pdmodel', '']
-        for ext in possible_extensions:
-            test_path = model_base.with_suffix(ext) if ext else model_base
+        # paddle.jit.save creates a .json file instead of .pdmodel, look for that
+        possible_files = [
+            model_base.with_suffix('.pdmodel'),  # Original expected file
+            model_base.with_suffix('.json'),     # What paddle.jit.save actually creates
+            model_base,                          # Base file without extension
+        ]
+        
+        for test_path in possible_files:
             if test_path.exists():
                 actual_model_files.append(test_path)
         
-        # Also check in the model directory for any .pdmodel files
+        # Also search the directory for any model-related files
         if model_file.parent.exists():
-            for pdmodel_file in model_file.parent.glob("*.pdmodel"):
-                if pdmodel_file not in actual_model_files:
-                    actual_model_files.append(pdmodel_file)
+            for pattern in ['*.pdmodel', '*.json', 'finetuned_*']:
+                for found_file in model_file.parent.glob(pattern):
+                    if found_file not in actual_model_files and found_file.is_file():
+                        actual_model_files.append(found_file)
         
         if actual_model_files:
             import shutil
             # Use the first found model file
             source_model = actual_model_files[0]
-            shutil.copy2(source_model, inference_model)
+            
+            # If we found a .json file, copy it but also create a .pdmodel file for compatibility
+            if source_model.suffix == '.json':
+                # Copy the JSON file as the model file
+                shutil.copy2(source_model, inference_model)
+                print(f"   ✅ Copied model (JSON format): {inference_model.name} from {source_model.name}")
+                
+                # Also create a symbolic link or copy with .pdmodel extension for compatibility
+                pdmodel_path = inference_dir / 'inference.pdmodel'
+                if not pdmodel_path.exists():
+                    shutil.copy2(source_model, pdmodel_path)
+                    print(f"   ✅ Created .pdmodel file for compatibility")
+            else:
+                shutil.copy2(source_model, inference_model)
+                print(f"   ✅ Copied model: {inference_model.name} from {source_model.name}")
+            
             model_size_kb = inference_model.stat().st_size / 1024
-            print(f"   ✅ Copied model: {inference_model.name} from {source_model.name} ({model_size_kb:.1f} KB)")
+            print(f"   📊 Model file size: {model_size_kb:.1f} KB")
         else:
             print(f"   ⚠️  No model files found. Searched: {model_file.parent}")
             # List what files exist in the directory for debugging
