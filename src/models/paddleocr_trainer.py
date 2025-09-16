@@ -412,8 +412,24 @@ class PaddleOCRTrainer:
             else:
                 raise Exception("No base model provided from CDN. Real training requires a base model to fine-tune. Please provide a valid CDN URL with a complete PaddleOCR model.")
             
-            ocr_model = PaddleOCR(**model_kwargs)
-            print(f"✅ Loaded real PaddleOCR {self.train_type} model")
+            # Use direct PaddleOCR initialization without triggering PaddleX
+            print(f"🚀 Initializing PaddleOCR with direct model loading (bypassing PaddleX)")
+            print(f"🔧 Model kwargs: {model_kwargs}")
+            
+            # Add parameters to bypass PaddleX auto-model creation
+            model_kwargs['use_pdserving'] = False
+            model_kwargs['warmup'] = False
+            
+            try:
+                ocr_model = PaddleOCR(**model_kwargs)
+                print(f"✅ Loaded real PaddleOCR {self.train_type} model successfully")
+            except Exception as paddleocr_error:
+                print(f"❌ PaddleOCR initialization failed: {paddleocr_error}")
+                # This is likely the PaddleX model mismatch issue
+                if "Model name mismatch" in str(paddleocr_error):
+                    raise Exception(f"PaddleOCR model initialization failed due to PaddleX trying to use incompatible model 'PP-OCRv5_server_det' with downloaded '{Path(base_model_path).name}'. This is a real PaddleX/PaddleOCR integration issue. Solution: 1) Use a compatible PaddleOCR model that matches PaddleX expectations, 2) Downgrade to PaddleOCR without PaddleX integration, or 3) Use a different model from CDN that's compatible with PaddleX.")
+                else:
+                    raise Exception(f"PaddleOCR model loading failed: {paddleocr_error}. Real training requires working PaddleOCR model initialization.")
             
             # Access the actual model components
             print("🔍 Inspecting PaddleOCR model structure...")
