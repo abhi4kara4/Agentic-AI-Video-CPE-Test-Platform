@@ -215,6 +215,9 @@ class PaddleOCRTrainer:
         
         print("🔥 Using PaddlePaddle with real PaddleOCR model loading...")
         
+        # Add start_time for this method 
+        start_time = time.time()
+        
         # Download base model from CDN if specified
         base_model_path = await self._download_base_model(training_config, training_dir)
         if base_model_path:
@@ -1022,14 +1025,36 @@ class PaddleOCRTrainer:
             params_size_kb = inference_params.stat().st_size / 1024
             print(f"   ✅ Copied parameters: {inference_params.name} ({params_size_kb:.1f} KB)")
         
-        # Handle model file
-        if model_file.exists():
+        # Handle model file - paddle.jit.save creates files without .pdmodel extension
+        actual_model_files = []
+        model_base = model_file.with_suffix('')
+        
+        # Check for different possible model file extensions
+        possible_extensions = ['.pdmodel', '']
+        for ext in possible_extensions:
+            test_path = model_base.with_suffix(ext) if ext else model_base
+            if test_path.exists():
+                actual_model_files.append(test_path)
+        
+        # Also check in the model directory for any .pdmodel files
+        if model_file.parent.exists():
+            for pdmodel_file in model_file.parent.glob("*.pdmodel"):
+                if pdmodel_file not in actual_model_files:
+                    actual_model_files.append(pdmodel_file)
+        
+        if actual_model_files:
             import shutil
-            shutil.copy2(model_file, inference_model)
+            # Use the first found model file
+            source_model = actual_model_files[0]
+            shutil.copy2(source_model, inference_model)
             model_size_kb = inference_model.stat().st_size / 1024
-            print(f"   ✅ Copied model: {inference_model.name} ({model_size_kb:.1f} KB)")
+            print(f"   ✅ Copied model: {inference_model.name} from {source_model.name} ({model_size_kb:.1f} KB)")
         else:
-            print(f"   ⚠️  Model path not valid: {model_file} (type: {type(model_file)})")
+            print(f"   ⚠️  No model files found. Searched: {model_file.parent}")
+            # List what files exist in the directory for debugging
+            if model_file.parent.exists():
+                existing_files = [f.name for f in model_file.parent.iterdir()]
+                print(f"   📁 Available files: {existing_files[:5]}...")  # Show first 5 files
         
         # Create info file
         info_content = {
