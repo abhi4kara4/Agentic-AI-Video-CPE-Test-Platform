@@ -500,13 +500,30 @@ class PaddleOCRTrainer:
                     def __init__(self, inference_model):
                         super().__init__()
                         self.inference_model = inference_model
-                        # Add trainable layers
-                        self.adaptation_layer = nn.Linear(256, 256)  # Simple adaptation layer
+                        self.adaptation_layer = None  # Initialize later after getting actual dimensions
                         
                     def forward(self, x):
                         # Run through inference model (frozen)
                         with paddle.no_grad():
                             features = self.inference_model(x)
+                        
+                        # Initialize adaptation layer with correct dimensions on first forward pass
+                        if self.adaptation_layer is None:
+                            # Get the actual feature dimensions from the inference model output
+                            if len(features.shape) > 2:
+                                # Flatten multi-dimensional outputs
+                                feature_dim = features.shape[-1] if len(features.shape) > 1 else features.numel()
+                                features = paddle.flatten(features, start_axis=1)
+                            else:
+                                feature_dim = features.shape[-1]
+                            
+                            print(f"🔧 Auto-detected feature dimensions: {feature_dim}")
+                            self.adaptation_layer = paddle.nn.Linear(feature_dim, feature_dim)
+                            
+                        # Flatten features if needed for the linear layer
+                        if len(features.shape) > 2:
+                            features = paddle.flatten(features, start_axis=1)
+                            
                         # Apply trainable adaptation
                         return self.adaptation_layer(features)
                 
