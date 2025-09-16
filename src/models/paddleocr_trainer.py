@@ -662,12 +662,12 @@ class PaddleOCRTrainer:
                     outputs = outputs[0]  # Take first output if multiple
                 
                 # Ensure compatible shapes for loss computation
-                if len(outputs.shape) > 2:
-                    outputs = F.adaptive_avg_pool2d(outputs, (1, 1))
+                # Flatten outputs to simple vector for loss computation
+                if len(outputs.shape) > 1:
                     outputs = paddle.flatten(outputs, start_axis=1)
                 
-                if len(targets_tensor.shape) > 2:
-                    targets_tensor = F.adaptive_avg_pool2d(targets_tensor, (1, 1))
+                # Flatten targets to match outputs
+                if len(targets_tensor.shape) > 1:
                     targets_tensor = paddle.flatten(targets_tensor, start_axis=1)
                 
                 # Ensure same number of elements
