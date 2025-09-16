@@ -434,13 +434,22 @@ class PaddleOCRTrainer:
                     pass
                 
                 def forward(self, inputs):
+                    # Convert paddle tensor to numpy for inference
+                    if hasattr(inputs, 'numpy'):
+                        numpy_inputs = inputs.numpy()
+                    else:
+                        numpy_inputs = inputs
+                    
                     # Run inference
                     input_handle = self.predictor.get_input_handle(self.input_names[0])
-                    input_handle.copy_from_cpu(inputs)
+                    input_handle.copy_from_cpu(numpy_inputs)
                     self.predictor.run()
                     
                     output_handle = self.predictor.get_output_handle(self.output_names[0])
-                    return output_handle.copy_to_cpu()
+                    output_numpy = output_handle.copy_to_cpu()
+                    
+                    # Convert back to paddle tensor for training
+                    return paddle.to_tensor(output_numpy)
                 
                 def __call__(self, inputs):
                     return self.forward(inputs)
