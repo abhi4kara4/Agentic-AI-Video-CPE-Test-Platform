@@ -557,10 +557,18 @@ class PaddleOCRTrainer:
             model_file = model_save_path / f'finetuned_{self.train_type}.pdmodel'
             params_file = model_save_path / f'finetuned_{self.train_type}.pdiparams'
             
-            # Save the actual trained model
-            paddle.jit.save(model, str(model_file.with_suffix('')))
-            print(f"✅ Saved fine-tuned model: {model_file}")
-            print(f"✅ Saved fine-tuned parameters: {params_file}")
+            # Save the actual trained model with input specification
+            try:
+                # Provide input specification for jit.save
+                example_input = paddle.randn([1, 3, 640, 640])  # Example input shape
+                paddle.jit.save(model, str(model_file.with_suffix('')), input_spec=[example_input])
+                print(f"✅ Saved fine-tuned model: {model_file}")
+                print(f"✅ Saved fine-tuned parameters: {params_file}")
+            except Exception as save_error:
+                print(f"⚠️  Model jit.save failed: {save_error}")
+                # Alternative: Save model state dict
+                paddle.save(model.state_dict(), str(model_file.with_suffix('.pdparams')))
+                print(f"✅ Saved model state dict instead: {model_file.with_suffix('.pdparams')}")
             
             # Package for deployment
             trained_model_path = await self._package_trained_model(model_file, params_file, training_dir, config)
