@@ -71,15 +71,18 @@ class PaddleOCRTrainer:
         if self.dataset_path.exists():
             print(f"🔍 Dataset directory contents: {list(self.dataset_path.iterdir())}")
         
-        # Determine training type from model name
-        if 'det' in model_name.lower():
+        # Determine training type from model name with better recognition support
+        model_lower = model_name.lower()
+        if any(x in model_lower for x in ['det', 'detection']):
             self.train_type = 'det'
-        elif 'rec' in model_name.lower():
+        elif any(x in model_lower for x in ['rec', 'recognition', 'crnn', 'svtr']):
             self.train_type = 'rec'
-        elif 'cls' in model_name.lower():
+        elif any(x in model_lower for x in ['cls', 'classification', 'orient']):
             self.train_type = 'cls'
         else:
             self.train_type = 'det'  # default
+        
+        print(f"🎯 Detected training type: {self.train_type.upper()} from model name: {model_name}")
         
         # Ensure directories exist
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -399,18 +402,29 @@ class PaddleOCRTrainer:
                             )
                         
                         def _create_resnet_backbone(self):
+                            # More realistic CRNN backbone for text recognition
                             return nn.Sequential(
-                                nn.Conv2D(3, 64, 7, stride=2, padding=3),
+                                nn.Conv2D(3, 64, 3, stride=1, padding=1),
                                 nn.BatchNorm2D(64),
                                 nn.ReLU(),
-                                nn.AdaptiveAvgPool2D((1, 25))
+                                nn.MaxPool2D(2),
+                                nn.Conv2D(64, 128, 3, stride=1, padding=1),
+                                nn.BatchNorm2D(128),
+                                nn.ReLU(),
+                                nn.MaxPool2D(2),
+                                nn.Conv2D(128, 256, 3, stride=1, padding=1),
+                                nn.BatchNorm2D(256),
+                                nn.ReLU(),
+                                nn.AdaptiveAvgPool2D((1, 32))  # Sequence length 32
                             )
                         
                         def _create_sequence_encoder(self):
-                            return nn.LSTM(64, 256, direction='bidirectional')
+                            # Bidirectional LSTM for sequence modeling
+                            return nn.LSTM(256, 256, direction='bidirectional', num_layers=2)
                         
                         def _create_ctc_head(self):
-                            return nn.Linear(512, 37)  # 37 character classes
+                            # CTC head for character recognition (95 classes: letters, digits, symbols, blank)
+                            return nn.Linear(512, 95)  # 95 character classes for multilingual
                         
                         def _create_lcnet_backbone(self):
                             return nn.Sequential(
@@ -546,18 +560,29 @@ class PaddleOCRTrainer:
                             )
                         
                         def _create_resnet_backbone(self):
+                            # More realistic CRNN backbone for text recognition
                             return nn.Sequential(
-                                nn.Conv2D(3, 64, 7, stride=2, padding=3),
+                                nn.Conv2D(3, 64, 3, stride=1, padding=1),
                                 nn.BatchNorm2D(64),
                                 nn.ReLU(),
-                                nn.AdaptiveAvgPool2D((1, 25))
+                                nn.MaxPool2D(2),
+                                nn.Conv2D(64, 128, 3, stride=1, padding=1),
+                                nn.BatchNorm2D(128),
+                                nn.ReLU(),
+                                nn.MaxPool2D(2),
+                                nn.Conv2D(128, 256, 3, stride=1, padding=1),
+                                nn.BatchNorm2D(256),
+                                nn.ReLU(),
+                                nn.AdaptiveAvgPool2D((1, 32))  # Sequence length 32
                             )
                         
                         def _create_sequence_encoder(self):
-                            return nn.LSTM(64, 256, direction='bidirectional')
+                            # Bidirectional LSTM for sequence modeling
+                            return nn.LSTM(256, 256, direction='bidirectional', num_layers=2)
                         
                         def _create_ctc_head(self):
-                            return nn.Linear(512, 37)  # 37 character classes
+                            # CTC head for character recognition (95 classes: letters, digits, symbols, blank)
+                            return nn.Linear(512, 95)  # 95 character classes for multilingual
                         
                         def _create_lcnet_backbone(self):
                             return nn.Sequential(
@@ -1069,13 +1094,26 @@ class PaddleOCRTrainer:
                                     # Add text regions with higher values
                                     target[100:540, 100:540] = 0.8  # Text region
                             elif train_type == 'rec':
-                                # For recognition: use real text labels
-                                text = sample.get('text', 'SAMPLE')
-                                # Convert to character embedding
-                                char_target = np.array([ord(c) % 256 for c in text[:32]], dtype=np.float32)
-                                if len(char_target) < 32:
-                                    char_target = np.pad(char_target, (0, 32-len(char_target)))
-                                target = char_target
+                                # For recognition: use real text labels with proper character encoding
+                                text = sample.get('text', sample.get('annotations', 'SAMPLE'))
+                                if isinstance(text, list):
+                                    # If annotations is a list, join them
+                                    text = ' '.join(str(t) for t in text)
+                                text = str(text)[:32]  # Limit to 32 characters
+                                
+                                # Create character-level target for CTC loss
+                                # Map characters to indices (simplified character set)
+                                char_to_idx = self._get_character_mapping()
+                                char_indices = []
+                                for char in text:
+                                    if char in char_to_idx:
+                                        char_indices.append(char_to_idx[char])
+                                    else:
+                                        char_indices.append(char_to_idx.get('<unk>', 0))
+                                
+                                # Pad to fixed length
+                                char_target = np.array(char_indices + [0] * (32 - len(char_indices)), dtype=np.int64)[:32]
+                                target = char_target.astype(np.float32)
                             else:
                                 # Classification: orientation angle
                                 angle = sample.get('orientation', 0.0)
@@ -1096,6 +1134,16 @@ class PaddleOCRTrainer:
                 continue
         
         return preprocessed_data
+    
+    def _get_character_mapping(self):
+        """Get character to index mapping for recognition training"""
+        # Common character set for OCR (digits, letters, symbols)
+        chars = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!\"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~ '
+        char_to_idx = {'<blank>': 0}  # CTC blank token
+        for i, char in enumerate(chars):
+            char_to_idx[char] = i + 1
+        char_to_idx['<unk>'] = len(chars) + 1  # Unknown character
+        return char_to_idx
     
     def _process_preprocessed_batch(self, model, batch_samples, train_type):
         """Process batch with pre-processed images (much faster)"""
@@ -1803,19 +1851,27 @@ class PaddleOCRTrainer:
             # Map our training types to official model names
             model_mapping = {
                 'det': {
-                    'en': 'en_PP-OCRv5_server_det',
-                    'ch': 'ch_PP-OCRv5_server_det', 
-                    'multilingual': 'mul_PP-OCRv5_server_det'
+                    'en': 'en_PP-OCRv4_server_det',
+                    'ch': 'ch_PP-OCRv4_server_det', 
+                    'multilingual': 'Multilingual_PP-OCRv3_det',
+                    'multi': 'Multilingual_PP-OCRv3_det'
                 },
                 'rec': {
-                    'en': 'en_PP-OCRv5_mobile_rec',
-                    'ch': 'ch_PP-OCRv5_mobile_rec',
-                    'multilingual': 'mul_PP-OCRv5_mobile_rec'
+                    'en': 'en_PP-OCRv4_rec',
+                    'ch': 'ch_PP-OCRv4_rec',
+                    'multilingual': 'Multilingual_PP-OCRv3_rec',
+                    'multi': 'Multilingual_PP-OCRv3_rec',
+                    # Additional recognition model options
+                    'latin': 'latin_PP-OCRv3_rec',
+                    'arabic': 'arabic_PP-OCRv3_rec',
+                    'korean': 'korean_PP-OCRv3_rec',
+                    'japanese': 'japan_PP-OCRv3_rec'
                 },
                 'cls': {
-                    'en': 'PP-LCNet_x1_0_doc_ori',
-                    'ch': 'PP-LCNet_x1_0_doc_ori',
-                    'multilingual': 'PP-LCNet_x1_0_doc_ori'
+                    'en': 'ch_ppocr_mobile_v2.0_cls',
+                    'ch': 'ch_ppocr_mobile_v2.0_cls',
+                    'multilingual': 'ch_ppocr_mobile_v2.0_cls',
+                    'multi': 'ch_ppocr_mobile_v2.0_cls'
                 }
             }
             
