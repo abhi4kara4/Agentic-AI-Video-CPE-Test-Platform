@@ -229,29 +229,32 @@ class PaddleOCRTrainer:
             downloaded_model_name = Path(base_model_path).name
             print(f"🔧 Detected downloaded model name: {downloaded_model_name}")
             
-            # Use the exact downloaded model name as the model identifier
-            # This ensures model name matches the actual downloaded model
+            # Use the exact downloaded model name to preserve model type and language
+            # Extract model characteristics from the actual downloaded name
             if "Multilingual_PP-OCRv3" in downloaded_model_name:
                 # For CDN models, use the exact name pattern that matches the download
                 self.model_name = downloaded_model_name
                 print(f"🎯 Using exact CDN model name: {self.model_name}")
-            elif "PP-OCRv3" in downloaded_model_name:
-                if self.train_type == 'det':
-                    self.model_name = "ch_PP-OCRv3_det"
-                elif self.train_type == 'rec':
-                    self.model_name = "ch_PP-OCRv3_rec"
-                else:
-                    self.model_name = "ch_PP-OCRv3_cls"
-            elif "PP-OCRv4" in downloaded_model_name:
-                if self.train_type == 'det':
-                    self.model_name = "ch_PP-OCRv4_det"
-                elif self.train_type == 'rec':
-                    self.model_name = "ch_PP-OCRv4_rec"
-                else:
-                    self.model_name = "ch_PP-OCRv4_cls"
             else:
-                # For unknown models, try to use the downloaded name directly
+                # For other models, preserve the original downloaded name structure
+                # This prevents converting rec models to det models
                 self.model_name = downloaded_model_name
+                print(f"🎯 Using exact downloaded model name: {self.model_name}")
+                
+                # Re-detect training type from the actual downloaded model name
+                model_lower = downloaded_model_name.lower()
+                original_train_type = self.train_type
+                if any(x in model_lower for x in ['det', 'detection']):
+                    self.train_type = 'det'
+                elif any(x in model_lower for x in ['rec', 'recognition', 'crnn', 'svtr']):
+                    self.train_type = 'rec'
+                elif any(x in model_lower for x in ['cls', 'classification', 'orient']):
+                    self.train_type = 'cls'
+                
+                if original_train_type != self.train_type:
+                    print(f"🔄 Updated training type from {original_train_type} to {self.train_type} based on downloaded model: {downloaded_model_name}")
+                else:
+                    print(f"✅ Training type {self.train_type} confirmed from downloaded model: {downloaded_model_name}")
             
             print(f"🔧 Using compatible model name: {self.model_name}")
         else:
@@ -886,9 +889,11 @@ class PaddleOCRTrainer:
             model_save_path = training_dir / 'paddleocr_finetuned'
             model_save_path.mkdir(parents=True, exist_ok=True)
             
-            # Save model and parameters
-            model_file = model_save_path / f'finetuned_{self.train_type}.pdmodel'
-            params_file = model_save_path / f'finetuned_{self.train_type}.pdiparams'
+            # Save model and parameters with accurate naming based on actual model
+            # Use the actual model name to determine the correct file naming
+            model_base_name = Path(self.model_name).stem if self.model_name else f"model_{self.train_type}"
+            model_file = model_save_path / f'finetuned_{model_base_name}.pdmodel'
+            params_file = model_save_path / f'finetuned_{model_base_name}.pdiparams'
             
             # Save the actual trained model with input specification
             try:
@@ -1390,6 +1395,21 @@ class PaddleOCRTrainer:
                 print(f"   ⚠️  Final model smaller than expected - may be missing base model files")
         
         # Copy to volume mount for persistence
+        # Validate training type matches the actual model before creating directory
+        model_name_lower = self.model_name.lower() if self.model_name else ""
+        expected_train_type = 'det'
+        if any(x in model_name_lower for x in ['rec', 'recognition', 'crnn', 'svtr']):
+            expected_train_type = 'rec'
+        elif any(x in model_name_lower for x in ['cls', 'classification', 'orient']):
+            expected_train_type = 'cls'
+        elif any(x in model_name_lower for x in ['det', 'detection']):
+            expected_train_type = 'det'
+            
+        if expected_train_type != self.train_type:
+            print(f"⚠️  Training type mismatch detected! Model '{self.model_name}' suggests '{expected_train_type}' but using '{self.train_type}'")
+            print(f"🔧 Correcting training type from '{self.train_type}' to '{expected_train_type}'")
+            self.train_type = expected_train_type
+        
         volume_dir = Path("/app/volumes/trained_models/paddleocr") / self.train_type / config.get('language', 'en')
         volume_dir.mkdir(parents=True, exist_ok=True)
         
