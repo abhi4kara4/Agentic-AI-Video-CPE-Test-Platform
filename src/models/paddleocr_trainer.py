@@ -367,6 +367,7 @@ class PaddleOCRTrainer:
                     class PaddleOCRCompatibleModel(nn.Layer):
                         def __init__(self, train_type):
                             super().__init__()
+                            self.train_type = train_type  # Store for use in forward pass
                             if train_type == 'det':
                                 # DB detection model architecture
                                 self.backbone = self._create_mobilenetv3_backbone()
@@ -443,6 +444,13 @@ class PaddleOCRTrainer:
                         def forward(self, x):
                             x = self.backbone(x)
                             if hasattr(self, 'neck'):
+                                # For recognition models, reshape for sequence processing
+                                if self.train_type == 'rec':
+                                    # Backbone output: (batch, 256, 1, 32)
+                                    # Reshape to (batch, 32, 256) for LSTM: (batch, sequence, features)
+                                    batch_size = x.shape[0]
+                                    x = x.squeeze(2)  # Remove height dimension: (batch, 256, 32)
+                                    x = x.transpose([0, 2, 1])  # Transpose to (batch, 32, 256)
                                 x = self.neck(x)
                             return self.head(x)
                     
@@ -525,6 +533,7 @@ class PaddleOCRTrainer:
                     class PaddleOCRCompatibleModel(nn.Layer):
                         def __init__(self, train_type):
                             super().__init__()
+                            self.train_type = train_type  # Store for use in forward pass
                             if train_type == 'det':
                                 # DB detection model architecture
                                 self.backbone = self._create_mobilenetv3_backbone()
@@ -601,6 +610,13 @@ class PaddleOCRTrainer:
                         def forward(self, x):
                             x = self.backbone(x)
                             if hasattr(self, 'neck'):
+                                # For recognition models, reshape for sequence processing
+                                if self.train_type == 'rec':
+                                    # Backbone output: (batch, 256, 1, 32)
+                                    # Reshape to (batch, 32, 256) for LSTM: (batch, sequence, features)
+                                    batch_size = x.shape[0]
+                                    x = x.squeeze(2)  # Remove height dimension: (batch, 256, 32)
+                                    x = x.transpose([0, 2, 1])  # Transpose to (batch, 32, 256)
                                 x = self.neck(x)
                             return self.head(x)
                     
@@ -709,6 +725,13 @@ class PaddleOCRTrainer:
                             def forward(self, x):
                                 x = self.backbone(x)
                                 if hasattr(self, 'neck'):
+                                    # For recognition models, reshape for sequence processing
+                                    if self.train_type == 'rec':
+                                        # Backbone output: (batch, 64, 1, 25) 
+                                        # Reshape to (batch, 25, 64) for LSTM: (batch, sequence, features)
+                                        batch_size = x.shape[0]
+                                        x = x.squeeze(2)  # Remove height dimension: (batch, 64, 25)
+                                        x = x.transpose([0, 2, 1])  # Transpose to (batch, 25, 64)
                                     x = self.neck(x)
                                 return self.head(x)
                         
@@ -1028,21 +1051,60 @@ class PaddleOCRTrainer:
                 # Real recognition model forward pass
                 outputs = model(images_tensor)
                 
-                targets_tensor = paddle.to_tensor(np.array(batch_targets), dtype='float32')
-                
-                # Recognition loss
+                # Recognition loss using CTC for sequence modeling
                 if isinstance(outputs, (list, tuple)):
                     outputs = outputs[0]
                 
-                # Flatten for sequence loss
-                if len(outputs.shape) > 2:
-                    outputs = paddle.reshape(outputs, [outputs.shape[0], -1])
+                # Outputs shape: (batch, sequence_length, num_classes)
+                # For CTC loss, we need (sequence_length, batch, num_classes)
+                if len(outputs.shape) == 3:
+                    outputs = outputs.transpose([1, 0, 2])  # (seq_len, batch, classes)
+                elif len(outputs.shape) == 2:
+                    # If flattened, reshape to sequence format
+                    seq_len = 32  # Max sequence length
+                    batch_size = outputs.shape[0]
+                    num_classes = outputs.shape[1] // seq_len
+                    outputs = outputs.reshape([batch_size, seq_len, num_classes])
+                    outputs = outputs.transpose([1, 0, 2])  # (seq_len, batch, classes)
                 
-                min_dim = min(outputs.shape[1], targets_tensor.shape[1])
-                outputs = outputs[:, :min_dim]
-                targets_tensor = targets_tensor[:, :min_dim]
+                # Prepare CTC targets - convert to integer indices
+                targets_int = []
+                target_lengths = []
+                for target in batch_targets:
+                    if isinstance(target, np.ndarray):
+                        # Remove padding (zeros) and convert to int
+                        non_zero_indices = target[target != 0].astype(np.int32)
+                        targets_int.extend(non_zero_indices.tolist())
+                        target_lengths.append(len(non_zero_indices))
+                    else:
+                        # Single target case
+                        targets_int.append(int(target))
+                        target_lengths.append(1)
                 
-                loss = F.mse_loss(outputs, targets_tensor)
+                # Create tensors for CTC loss
+                targets_tensor = paddle.to_tensor(targets_int, dtype='int32')
+                target_lengths_tensor = paddle.to_tensor(target_lengths, dtype='int32')
+                input_lengths = paddle.full([outputs.shape[1]], outputs.shape[0], dtype='int32')
+                
+                # Log-softmax for CTC loss
+                log_probs = F.log_softmax(outputs, axis=2)
+                
+                # CTC Loss
+                try:
+                    import paddle.nn as nn
+                    ctc_loss = nn.CTCLoss(blank=0, reduction='mean')
+                    loss = ctc_loss(log_probs, targets_tensor, input_lengths, target_lengths_tensor)
+                except Exception as ctc_error:
+                    print(f"   ⚠️  CTC loss failed, using simplified loss: {ctc_error}")
+                    # Fallback to cross-entropy loss on flattened outputs
+                    outputs_flat = outputs.transpose([1, 0, 2]).reshape([-1, outputs.shape[2]])
+                    targets_flat = paddle.to_tensor(np.array(batch_targets).flatten(), dtype='int64')
+                    # Only use non-padding targets
+                    valid_mask = targets_flat != 0
+                    if paddle.sum(valid_mask) > 0:
+                        loss = F.cross_entropy(outputs_flat[valid_mask], targets_flat[valid_mask])
+                    else:
+                        loss = paddle.to_tensor(0.1, dtype='float32')
                 
             else:
                 # Classification model forward pass
@@ -1204,21 +1266,60 @@ class PaddleOCRTrainer:
                 # Real recognition model forward pass
                 outputs = model(images_tensor)
                 
-                targets_tensor = paddle.to_tensor(np.array(batch_targets), dtype='float32')
-                
-                # Recognition loss
+                # Recognition loss using CTC for sequence modeling
                 if isinstance(outputs, (list, tuple)):
                     outputs = outputs[0]
                 
-                # Flatten for sequence loss
-                if len(outputs.shape) > 2:
-                    outputs = paddle.reshape(outputs, [outputs.shape[0], -1])
+                # Outputs shape: (batch, sequence_length, num_classes)
+                # For CTC loss, we need (sequence_length, batch, num_classes)
+                if len(outputs.shape) == 3:
+                    outputs = outputs.transpose([1, 0, 2])  # (seq_len, batch, classes)
+                elif len(outputs.shape) == 2:
+                    # If flattened, reshape to sequence format
+                    seq_len = 32  # Max sequence length
+                    batch_size = outputs.shape[0]
+                    num_classes = outputs.shape[1] // seq_len
+                    outputs = outputs.reshape([batch_size, seq_len, num_classes])
+                    outputs = outputs.transpose([1, 0, 2])  # (seq_len, batch, classes)
                 
-                min_dim = min(outputs.shape[1], targets_tensor.shape[1])
-                outputs = outputs[:, :min_dim]
-                targets_tensor = targets_tensor[:, :min_dim]
+                # Prepare CTC targets - convert to integer indices
+                targets_int = []
+                target_lengths = []
+                for target in batch_targets:
+                    if isinstance(target, np.ndarray):
+                        # Remove padding (zeros) and convert to int
+                        non_zero_indices = target[target != 0].astype(np.int32)
+                        targets_int.extend(non_zero_indices.tolist())
+                        target_lengths.append(len(non_zero_indices))
+                    else:
+                        # Single target case
+                        targets_int.append(int(target))
+                        target_lengths.append(1)
                 
-                loss = F.mse_loss(outputs, targets_tensor)
+                # Create tensors for CTC loss
+                targets_tensor = paddle.to_tensor(targets_int, dtype='int32')
+                target_lengths_tensor = paddle.to_tensor(target_lengths, dtype='int32')
+                input_lengths = paddle.full([outputs.shape[1]], outputs.shape[0], dtype='int32')
+                
+                # Log-softmax for CTC loss
+                log_probs = F.log_softmax(outputs, axis=2)
+                
+                # CTC Loss
+                try:
+                    import paddle.nn as nn
+                    ctc_loss = nn.CTCLoss(blank=0, reduction='mean')
+                    loss = ctc_loss(log_probs, targets_tensor, input_lengths, target_lengths_tensor)
+                except Exception as ctc_error:
+                    print(f"   ⚠️  CTC loss failed, using simplified loss: {ctc_error}")
+                    # Fallback to cross-entropy loss on flattened outputs
+                    outputs_flat = outputs.transpose([1, 0, 2]).reshape([-1, outputs.shape[2]])
+                    targets_flat = paddle.to_tensor(np.array(batch_targets).flatten(), dtype='int64')
+                    # Only use non-padding targets
+                    valid_mask = targets_flat != 0
+                    if paddle.sum(valid_mask) > 0:
+                        loss = F.cross_entropy(outputs_flat[valid_mask], targets_flat[valid_mask])
+                    else:
+                        loss = paddle.to_tensor(0.1, dtype='float32')
                 
             else:
                 # Classification model forward pass
@@ -1243,6 +1344,8 @@ class PaddleOCRTrainer:
     async def _package_trained_model(self, model_file: Path, params_file: Path, training_dir: Path, config: Dict[str, Any], base_model_path: Optional[str] = None) -> Path:
         """Package trained model files for deployment"""
         
+        import shutil  # Import at function start to avoid scope issues
+        
         print("📦 Packaging trained model files...")
         
         # Create inference directory
@@ -1264,7 +1367,6 @@ class PaddleOCRTrainer:
         
         # Copy parameters file (fine-tuned weights)
         if params_file.exists():
-            import shutil
             shutil.copy2(params_file, inference_params)
             params_size_kb = inference_params.stat().st_size / 1024
             print(f"   ✅ Copied fine-tuned parameters: {inference_params.name} ({params_size_kb:.1f} KB)")
