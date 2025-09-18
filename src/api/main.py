@@ -1851,6 +1851,16 @@ async def generate_training_dataset(
         
         dataset_type = metadata.get("dataset_type", "object_detection")
         
+        # Get augmentation settings from metadata instead of request
+        metadata_augmentation_options = metadata.get("augmentation_options", {})
+        
+        # Determine if augmentation should be enabled based on metadata
+        metadata_augment_enabled = any(
+            option.get("enabled", False) 
+            for option in metadata_augmentation_options.values() 
+            if isinstance(option, dict)
+        )
+        
         # Get all labeled images
         images_dir = dataset_dir / "images"
         annotations_dir = dataset_dir / "annotations"
@@ -1952,6 +1962,40 @@ async def generate_training_dataset(
         if len(labeled_images) == 0:
             raise HTTPException(status_code=400, detail="No labeled images found in dataset")
         
+        # Check individual image augmentation options
+        individual_augment_enabled = False
+        augment_count = 0
+        
+        for item in labeled_images:
+            annotation = item.get("annotation", {})
+            image_augment_options = annotation.get("augmentation_options", {})
+            if isinstance(image_augment_options, dict):
+                has_enabled_augmentation = any(
+                    option.get("enabled", False) 
+                    for option in image_augment_options.values() 
+                    if isinstance(option, dict)
+                )
+                if has_enabled_augmentation:
+                    individual_augment_enabled = True
+                    augment_count += 1
+        
+        # Final decision: use metadata if available, otherwise check individual images, fallback to request
+        if metadata_augmentation_options:
+            final_augment = metadata_augment_enabled
+            augment_source = "metadata"
+        elif augment_count > 0:
+            final_augment = individual_augment_enabled
+            augment_source = f"individual_images_{augment_count}"
+        else:
+            final_augment = request.augment
+            augment_source = "request"
+        
+        final_augment_factor = request.augment_factor  # Keep user's requested factor
+        
+        log.info(f"Augmentation decision - Source: {augment_source}")
+        log.info(f"Metadata enabled: {metadata_augment_enabled}, Individual images with augmentation: {augment_count}")
+        log.info(f"Final augmentation enabled: {final_augment}, Factor: {final_augment_factor}")
+        
         # Create training dataset directory
         training_dir = TRAINING_DIR / f"{dataset_name}_training_{request.format}"
         training_dir.mkdir(parents=True, exist_ok=True)
@@ -1965,13 +2009,13 @@ async def generate_training_dataset(
         
         # Generate dataset based on format
         if request.format == "yolo" and dataset_type == "object_detection":
-            await generate_yolo_dataset(training_dir, train_images, val_images, request.augment, request.augment_factor)
+            await generate_yolo_dataset(training_dir, train_images, val_images, final_augment, final_augment_factor)
         elif request.format == "folder_structure" and dataset_type == "image_classification":
-            await generate_classification_dataset(training_dir, train_images, val_images, request.augment, request.augment_factor)
+            await generate_classification_dataset(training_dir, train_images, val_images, final_augment, final_augment_factor)
         elif request.format == "llava" and dataset_type == "vision_llm":
-            await generate_llava_dataset(training_dir, train_images, val_images, request.augment, request.augment_factor)
+            await generate_llava_dataset(training_dir, train_images, val_images, final_augment, final_augment_factor)
         elif request.format == "paddleocr" and dataset_type == "paddleocr":
-            await generate_paddleocr_dataset(training_dir, train_images, val_images, request.augment, request.augment_factor)
+            await generate_paddleocr_dataset(training_dir, train_images, val_images, final_augment, final_augment_factor)
         else:
             raise HTTPException(status_code=400, detail=f"Format '{request.format}' not supported for dataset type '{dataset_type}'")
         
@@ -1998,7 +2042,13 @@ async def generate_training_dataset(
             "total_images": len(labeled_images),
             "train_images": len(train_images),
             "val_images": len(val_images),
-            "augmentation_enabled": request.augment,
+            "augmentation_enabled": final_augment,
+            "augmentation_factor": final_augment_factor,
+            "augmentation_source": "metadata" if metadata_augmentation_options else "request",
+            "enabled_augmentations": [
+                option for option, config in metadata_augmentation_options.items()
+                if isinstance(config, dict) and config.get("enabled", False)
+            ] if metadata_augmentation_options else [],
             "zip_file": str(zip_path.name),
             "file_size": zip_path.stat().st_size
         }
