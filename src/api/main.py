@@ -250,40 +250,51 @@ async def health_check():
 
 # Video streaming endpoints
 @app.get("/video/stream")
-async def video_stream(device: Optional[str] = None, outlet: Optional[str] = None, resolution: Optional[str] = None):
+async def video_stream(
+    device: Optional[str] = None, 
+    outlet: Optional[str] = None, 
+    resolution: Optional[str] = None,
+    custom_url: Optional[str] = None
+):
     """Stream video frames"""
-    log.info(f"Video stream requested - device: {device}, outlet: {outlet}, resolution: {resolution}")
+    log.info(f"Video stream requested - device: {device}, outlet: {outlet}, resolution: {resolution}, custom_url: {custom_url}")
     
     if not orchestrator:
         raise HTTPException(status_code=503, detail="Service not initialized")
     
-    # Parse resolution parameter
-    resolution_w = settings.video_resolution_w
-    resolution_h = settings.video_resolution_h
-    
-    if resolution:
-        try:
-            parts = resolution.split('x')
-            if len(parts) == 2:
-                resolution_w = int(parts[0])
-                resolution_h = int(parts[1])
-                log.info(f"Using resolution: {resolution_w}x{resolution_h}")
-        except (ValueError, IndexError):
-            log.warning(f"Invalid resolution format: {resolution}, using default")
-    
-    # Build dynamic stream URL
-    device_id = device or settings.video_device_id
-    outlet_id = outlet or settings.video_outlet
-    
-    dynamic_stream_url = (
-        f"{settings.video_capture_base_url}/rack/cats-rack-sn-557.rack.abc.net:443"
-        f"/magiq/video/device/{device_id}/stream"
-        f"?outlet={outlet_id}"
-        f"&resolution_w={resolution_w}"
-        f"&resolution_h={resolution_h}"
-    )
-    
-    log.info(f"Using dynamic stream URL: {dynamic_stream_url}")
+    # Determine stream URL based on parameters
+    if custom_url:
+        # Use custom stream URL directly
+        dynamic_stream_url = custom_url
+        log.info(f"Using custom stream URL: {dynamic_stream_url}")
+    else:
+        # Parse resolution parameter
+        resolution_w = settings.video_resolution_w
+        resolution_h = settings.video_resolution_h
+        
+        if resolution:
+            try:
+                parts = resolution.split('x')
+                if len(parts) == 2:
+                    resolution_w = int(parts[0])
+                    resolution_h = int(parts[1])
+                    log.info(f"Using resolution: {resolution_w}x{resolution_h}")
+            except (ValueError, IndexError):
+                log.warning(f"Invalid resolution format: {resolution}, using default")
+        
+        # Build dynamic stream URL from device parameters
+        device_id = device or settings.video_device_id
+        outlet_id = outlet or settings.video_outlet
+        
+        dynamic_stream_url = (
+            f"{settings.video_capture_base_url}/rack/cats-rack-sn-557.rack.abc.net:443"
+            f"/magiq/video/device/{device_id}/stream"
+            f"?outlet={outlet_id}"
+            f"&resolution_w={resolution_w}"
+            f"&resolution_h={resolution_h}"
+        )
+        
+        log.info(f"Using constructed stream URL: {dynamic_stream_url}")
     
     # Update the video capture URL dynamically
     orchestrator.video_capture.update_stream_url(dynamic_stream_url)

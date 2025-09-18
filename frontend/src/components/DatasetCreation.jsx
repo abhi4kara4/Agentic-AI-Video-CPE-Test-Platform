@@ -544,7 +544,7 @@ const DatasetCreation = ({ onNotification }) => {
       // Get stream URL based on configuration type
       let streamUrl;
       if (config.useCustomStreamUrl) {
-        streamUrl = config.customStreamUrl + (config.customStreamUrl.includes('?') ? '&' : '?') + `t=${Date.now()}`;
+        streamUrl = videoAPI.getCustomStreamUrl(config.customStreamUrl) + `&t=${Date.now()}`;
       } else {
         streamUrl = videoAPI.getStreamUrl(config.deviceId, config.outlet, config.resolution) + `&t=${Date.now()}`;
       }
@@ -599,7 +599,7 @@ const DatasetCreation = ({ onNotification }) => {
         // Get stream URL based on configuration type
         let streamUrl;
         if (config.useCustomStreamUrl) {
-          streamUrl = config.customStreamUrl + (config.customStreamUrl.includes('?') ? '&' : '?') + `t=${Date.now()}`;
+          streamUrl = videoAPI.getCustomStreamUrl(config.customStreamUrl) + `&t=${Date.now()}`;
         } else {
           streamUrl = videoAPI.getStreamUrl(config.deviceId, config.outlet, config.resolution) + `&t=${Date.now()}`;
         }
@@ -644,7 +644,7 @@ const DatasetCreation = ({ onNotification }) => {
       // Get stream URL based on configuration type
       let newStreamUrl;
       if (config.useCustomStreamUrl) {
-        newStreamUrl = config.customStreamUrl + (config.customStreamUrl.includes('?') ? '&' : '?') + `t=${Date.now()}`;
+        newStreamUrl = videoAPI.getCustomStreamUrl(config.customStreamUrl) + `&t=${Date.now()}`;
       } else {
         newStreamUrl = videoAPI.getStreamUrl(config.deviceId, config.outlet, config.resolution) + `&t=${Date.now()}`;
       }

@@ -45,6 +45,8 @@ export const videoAPI = {
   captureScreenshot: () => apiClient.get('/video/screenshot'),
   getStreamUrl: (deviceId, outlet, resolution) => 
     `${API_BASE_URL}/video/stream?device=${deviceId}&outlet=${outlet}&resolution=${resolution}`,
+  getCustomStreamUrl: (customUrl) => 
+    `${API_BASE_URL}/video/stream?custom_url=${encodeURIComponent(customUrl)}`,
   getImageUrl: (filename) => `${API_BASE_URL}/images/${filename}`,
   getDatasetImageUrl: (datasetName, filename) => `${API_BASE_URL}/datasets/${datasetName}/images/${filename}`,
 };
