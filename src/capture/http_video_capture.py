@@ -276,7 +276,7 @@ class HttpVideoCapture:
                         frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
                         
                         if frame is not None:
-                            log.info(f"✓ Successfully decoded MJPEG frame: {frame.shape}")
+                            log.debug(f"✓ Successfully decoded MJPEG frame: {frame.shape}")
                             return frame
             
             log.warning("Could not extract frame from MJPEG stream")
