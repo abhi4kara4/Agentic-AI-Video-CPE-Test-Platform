@@ -1136,7 +1136,7 @@ async def get_screen_states():
 
 
 # Dataset generation helper functions
-async def generate_yolo_dataset(training_dir: Path, train_images: list, val_images: list, augment: bool, augment_factor: int):
+async def generate_yolo_dataset(training_dir: Path, train_images: list, val_images: list, augment: bool, augment_factor: int, metadata_augmentation_options: dict = None):
     """Generate YOLO format dataset"""
     # Create directory structure
     (training_dir / "images" / "train").mkdir(parents=True, exist_ok=True)
@@ -1187,8 +1187,15 @@ async def generate_yolo_dataset(training_dir: Path, train_images: list, val_imag
             try:
                 from src.utils.image_augmentation import augment_for_yolo_format, AUGMENTATION_PRESETS
                 
-                # Use real augmentation
-                augmentation_config = AUGMENTATION_PRESETS.get("object_detection", {})
+                # Use metadata augmentation options if available, otherwise use preset
+                if metadata_augmentation_options:
+                    augmentation_config = metadata_augmentation_options
+                    log.info(f"Using metadata augmentation config for train_{i:04d}: {augmentation_config}")
+                else:
+                    augmentation_config = AUGMENTATION_PRESETS.get("object_detection", {})
+                    log.info(f"Using preset augmentation config for train_{i:04d}")
+                
+                log.info(f"Applying {augment_factor} augmentations to train_{i:04d}.jpg")
                 created_files = augment_for_yolo_format(
                     image_path=str(train_img_path),
                     yolo_label_path=str(yolo_label_path),
@@ -1204,13 +1211,15 @@ async def generate_yolo_dataset(training_dir: Path, train_images: list, val_imag
                     if file_path.endswith('.jpg'):
                         train_paths.append(file_path)
                 
-                print(f"✨ Applied real augmentations to {train_img_path.name}: {len(created_files)//2} versions created")
+                log.info(f"✨ Applied real augmentations to {train_img_path.name}: {len(created_files)//2} versions created")
+                log.info(f"Created files: {created_files}")
                 
             except ImportError as e:
                 log.warning(f"Real augmentation not available: {e}")
                 log.info("Falling back to file duplication")
                 
                 # Fall back to file duplication
+                log.info(f"Fallback duplication: creating {augment_factor} copies of train_{i:04d}")
                 for aug_idx in range(augment_factor):
                     aug_img_path = training_dir / "images" / "train" / f"train_{i:04d}_aug_{aug_idx}.jpg"
                     aug_label_path = training_dir / "labels" / "train" / f"train_{i:04d}_aug_{aug_idx}.txt"
@@ -1218,6 +1227,7 @@ async def generate_yolo_dataset(training_dir: Path, train_images: list, val_imag
                     shutil.copy2(train_img_path, aug_img_path)
                     shutil.copy2(yolo_label_path, aug_label_path)
                     train_paths.append(str(aug_img_path))
+                log.info(f"Created {augment_factor} duplicated versions for train_{i:04d}")
                     
             except Exception as e:
                 log.error(f"Augmentation error for {train_img_path.name}: {e}")
@@ -1267,6 +1277,12 @@ names: {classes}
 """
     with open(training_dir / "dataset.yaml", "w") as f:
         f.write(yaml_content)
+    
+    # Log final counts
+    log.info(f"YOLO dataset generation complete:")
+    log.info(f"  Classes: {len(classes)} - {classes}")
+    log.info(f"  Training images: {len(train_paths)}")
+    log.info(f"  Validation images: {len(val_paths)}")
 
 
 async def generate_classification_dataset(training_dir: Path, train_images: list, val_images: list, augment: bool, augment_factor: int):
@@ -1837,6 +1853,8 @@ async def generate_training_dataset(
 ):
     """Generate a training dataset with proper format, train/test split, and augmentation"""
     try:
+        log.info(f"Generate training request: format={request.format}, train_split={request.train_split}, augment={request.augment}, augment_factor={request.augment_factor}")
+        
         dataset_dir = DATASETS_DIR / dataset_name
         if not dataset_dir.exists():
             raise HTTPException(status_code=404, detail="Dataset not found")
@@ -1996,6 +2014,16 @@ async def generate_training_dataset(
         log.info(f"Metadata enabled: {metadata_augment_enabled}, Individual images with augmentation: {augment_count}")
         log.info(f"Final augmentation enabled: {final_augment}, Factor: {final_augment_factor}")
         
+        # Log detailed augmentation options from metadata
+        if metadata_augmentation_options:
+            enabled_augmentations = [
+                f"{option}: {config}" for option, config in metadata_augmentation_options.items()
+                if isinstance(config, dict) and config.get("enabled", False)
+            ]
+            log.info(f"Enabled augmentations from metadata: {enabled_augmentations}")
+        else:
+            log.info("No augmentation options found in metadata")
+        
         # Create training dataset directory
         training_dir = TRAINING_DIR / f"{dataset_name}_training_{request.format}"
         try:
@@ -2015,9 +2043,15 @@ async def generate_training_dataset(
         train_images = labeled_images[:split_idx]
         val_images = labeled_images[split_idx:]
         
+        # Log dataset composition before generation
+        log.info(f"Dataset composition: {len(train_images)} training, {len(val_images)} validation images")
+        if final_augment:
+            expected_train_count = len(train_images) * (1 + final_augment_factor)
+            log.info(f"Expected training images after augmentation: {expected_train_count} (factor: {final_augment_factor})")
+        
         # Generate dataset based on format
         if request.format == "yolo" and dataset_type == "object_detection":
-            await generate_yolo_dataset(training_dir, train_images, val_images, final_augment, final_augment_factor)
+            await generate_yolo_dataset(training_dir, train_images, val_images, final_augment, final_augment_factor, metadata_augmentation_options)
         elif request.format == "folder_structure" and dataset_type == "image_classification":
             await generate_classification_dataset(training_dir, train_images, val_images, final_augment, final_augment_factor)
         elif request.format == "llava" and dataset_type == "vision_llm":
