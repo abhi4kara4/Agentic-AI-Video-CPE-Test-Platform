@@ -425,12 +425,14 @@ const ObjectDetectionLabeler = ({
       id: Date.now() + Math.random() // New unique ID
     }));
     
-    setBoundingBoxes(pastedBoxes);
+    // Add to existing annotations instead of replacing them
+    const updatedBoundingBoxes = [...boundingBoxes, ...pastedBoxes];
+    setBoundingBoxes(updatedBoundingBoxes);
     
     // Update labels immediately
     const updatedLabels = {
       ...labels,
-      boundingBoxes: pastedBoxes
+      boundingBoxes: updatedBoundingBoxes
     };
     onLabelsChange(updatedLabels);
   };
