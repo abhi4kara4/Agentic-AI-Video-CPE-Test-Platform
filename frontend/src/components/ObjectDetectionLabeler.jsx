@@ -12,7 +12,12 @@ import {
   Paper,
   Grid,
   Tooltip,
-  Checkbox
+  Checkbox,
+  Slider,
+  FormControlLabel,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -26,10 +31,12 @@ import {
   ContentCopy as CopyIcon,
   ContentPaste as PasteIcon,
   SelectAll as SelectAllIcon,
-  Deselect as DeselectIcon
+  Deselect as DeselectIcon,
+  ExpandMore as ExpandMoreIcon,
+  Settings as SettingsIcon
 } from '@mui/icons-material';
 
-import { OBJECT_DETECTION_CLASSES } from '../constants/datasetTypes.js';
+import { OBJECT_DETECTION_CLASSES, AUGMENTATION_OPTIONS, DATASET_TYPES } from '../constants/datasetTypes.js';
 
 const ObjectDetectionLabeler = ({ 
   image, 
@@ -39,7 +46,9 @@ const ObjectDetectionLabeler = ({
   onCopyAnnotations,
   showCopyPaste = false,
   imageName = null,
-  customClasses = null
+  customClasses = null,
+  copiedAugmentationOptions = null,
+  onCopyAugmentationOptions = null
 }) => {
   const canvasRef = useRef(null);
   const imageRef = useRef(null); // Cache the loaded image
@@ -54,6 +63,9 @@ const ObjectDetectionLabeler = ({
   const [selectedClass, setSelectedClass] = useState(Object.keys(availableClasses)[0] || 'button');
   const [boundingBoxes, setBoundingBoxes] = useState(labels?.boundingBoxes || []);
   const [selectedAnnotations, setSelectedAnnotations] = useState(new Set());
+  const [augmentationOptions, setAugmentationOptions] = useState(
+    labels?.augmentationOptions || AUGMENTATION_OPTIONS[DATASET_TYPES.OBJECT_DETECTION] || {}
+  );
   
   // Debug logging for received labels and update boundingBoxes when labels change
   useEffect(() => {
@@ -63,6 +75,10 @@ const ObjectDetectionLabeler = ({
       setBoundingBoxes(labels.boundingBoxes); // Update state when labels change
     } else {
       setBoundingBoxes([]); // Clear if no bounding boxes
+    }
+    // Update augmentation options from labels
+    if (labels?.augmentationOptions) {
+      setAugmentationOptions(labels.augmentationOptions);
     }
     // Clear selected annotations when labels change (e.g., switching images)
     setSelectedAnnotations(new Set());
@@ -125,9 +141,10 @@ const ObjectDetectionLabeler = ({
   useEffect(() => {
     onLabelsChange({
       ...labels,
-      boundingBoxes: boundingBoxes
+      boundingBoxes: boundingBoxes,
+      augmentationOptions: augmentationOptions
     });
-  }, [boundingBoxes]);
+  }, [boundingBoxes, augmentationOptions]);
 
   // Reset pan offset when zoom changes significantly or image changes
   useEffect(() => {
@@ -496,6 +513,25 @@ const ObjectDetectionLabeler = ({
     setSelectedAnnotations(new Set());
   };
 
+  const handleAugmentationChange = (option, value) => {
+    setAugmentationOptions(prev => ({
+      ...prev,
+      [option]: { ...prev[option], ...value }
+    }));
+  };
+
+  const handleCopyAugmentationOptions = () => {
+    if (onCopyAugmentationOptions) {
+      onCopyAugmentationOptions({ ...augmentationOptions });
+    }
+  };
+
+  const handlePasteAugmentationOptions = () => {
+    if (copiedAugmentationOptions) {
+      setAugmentationOptions({ ...copiedAugmentationOptions });
+    }
+  };
+
   return (
     <Box>
       <Typography variant="h6" gutterBottom>
@@ -755,6 +791,77 @@ const ObjectDetectionLabeler = ({
                 ))}
               </Box>
             </Box>
+
+            {/* Augmentation Options */}
+            <Accordion sx={{ mt: 2 }}>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <SettingsIcon fontSize="small" />
+                  <Typography variant="subtitle2">
+                    Augmentation Options
+                  </Typography>
+                </Box>
+              </AccordionSummary>
+              <AccordionDetails>
+                {Object.entries(AUGMENTATION_OPTIONS[DATASET_TYPES.OBJECT_DETECTION] || {}).map(([option, defaultConfig]) => (
+                  <Box key={option} sx={{ mb: 2 }}>
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          checked={augmentationOptions[option]?.enabled ?? defaultConfig.enabled}
+                          onChange={(e) => handleAugmentationChange(option, { enabled: e.target.checked })}
+                          size="small"
+                        />
+                      }
+                      label={option.charAt(0).toUpperCase() + option.slice(1)}
+                    />
+                    
+                    {augmentationOptions[option]?.enabled && defaultConfig.range && (
+                      <Box sx={{ mt: 1, px: 2 }}>
+                        <Typography variant="caption" color="text.secondary">
+                          Range: {defaultConfig.range[0]} to {defaultConfig.range[1]}
+                        </Typography>
+                        <Slider
+                          size="small"
+                          value={augmentationOptions[option]?.range || defaultConfig.range}
+                          min={Math.min(...defaultConfig.range)}
+                          max={Math.max(...defaultConfig.range)}
+                          step={(Math.max(...defaultConfig.range) - Math.min(...defaultConfig.range)) / 20}
+                          valueLabelDisplay="auto"
+                          onChange={(_, value) => handleAugmentationChange(option, { range: value })}
+                          sx={{ mt: 1 }}
+                        />
+                      </Box>
+                    )}
+                  </Box>
+                ))}
+                
+                {/* Copy/Paste Augmentation Options */}
+                <Box sx={{ display: 'flex', gap: 1, mt: 2, pt: 2, borderTop: '1px solid', borderColor: 'divider' }}>
+                  <Tooltip title="Copy Augmentation Options">
+                    <IconButton 
+                      size="small" 
+                      onClick={handleCopyAugmentationOptions}
+                      color="primary"
+                    >
+                      <CopyIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title={!copiedAugmentationOptions ? "No augmentation options copied" : "Paste Augmentation Options"}>
+                    <span>
+                      <IconButton 
+                        size="small" 
+                        onClick={handlePasteAugmentationOptions}
+                        disabled={!copiedAugmentationOptions}
+                        color="secondary"
+                      >
+                        <PasteIcon fontSize="small" />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                </Box>
+              </AccordionDetails>
+            </Accordion>
           </Paper>
         </Grid>
       </Grid>

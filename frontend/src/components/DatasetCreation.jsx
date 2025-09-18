@@ -56,6 +56,7 @@ import {
   CheckBoxOutlineBlank as UncheckedIcon,
   CheckBox as CheckedIcon,
   Deselect as DeselectIcon,
+  Settings as SettingsIcon,
 } from '@mui/icons-material';
 import { videoAPI, deviceAPI, datasetAPI } from '../services/api.jsx';
 import { useDatasetCreation } from '../context/DatasetCreationContext.jsx';
@@ -209,9 +210,11 @@ const DatasetCreation = ({ onNotification }) => {
 
   // Copy/Paste and Multi-selection state
   const [copiedAnnotations, setCopiedAnnotations] = useState(null);
+  const [copiedAugmentationOptions, setCopiedAugmentationOptions] = useState(null);
   const [selectedImages, setSelectedImages] = useState(new Set());
   const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
   const [showBulkPasteDialog, setShowBulkPasteDialog] = useState(false);
+  const [showBulkAugmentationPasteDialog, setShowBulkAugmentationPasteDialog] = useState(false);
 
   // Load datasets on component mount
   useEffect(() => {
@@ -1271,6 +1274,18 @@ const DatasetCreation = ({ onNotification }) => {
     });
   };
 
+  const handleCopyAugmentationOptions = (augmentationOptions) => {
+    setCopiedAugmentationOptions({ ...augmentationOptions });
+    
+    const enabledCount = Object.values(augmentationOptions).filter(opt => opt?.enabled).length;
+    
+    onNotification({
+      type: 'success',
+      title: 'Augmentation Options Copied',
+      message: `Copied ${enabledCount} augmentation settings`
+    });
+  };
+
   const handleImageSelect = (imageId, isSelected) => {
     setSelectedImages(prev => {
       const newSet = new Set(prev);
@@ -1396,6 +1411,77 @@ const DatasetCreation = ({ onNotification }) => {
         type: 'error',
         title: 'Bulk Paste Failed',
         message: 'Failed to paste annotations to selected images'
+      });
+    } finally {
+      setIsGeneratingDataset(false);
+    }
+  };
+
+  const handleBulkPasteAugmentationOptions = async () => {
+    if (!copiedAugmentationOptions || selectedImages.size === 0) return;
+
+    try {
+      setIsGeneratingDataset(true);
+      
+      const imagesToUpdate = capturedImages.filter(img => selectedImages.has(img.id));
+      let successCount = 0;
+      let failCount = 0;
+
+      for (const image of imagesToUpdate) {
+        try {
+          // Get existing labels and update with augmentation options
+          const existingLabels = image.labels || {};
+          const updatedLabels = {
+            ...existingLabels,
+            augmentationOptions: { ...copiedAugmentationOptions }
+          };
+
+          // Create label data for backend save
+          const labelData = {
+            boundingBoxes: existingLabels.boundingBoxes || [],
+            notes: existingLabels.notes || '',
+            augmentationOptions: copiedAugmentationOptions
+          };
+
+          // Save to backend
+          await datasetAPI.labelImage(
+            currentDataset.name,
+            image.filename,
+            'object_detection', // screen_type for object detection
+            labelData.notes,
+            labelData
+          );
+
+          // Update local state
+          const updatedImage = { ...image, labels: updatedLabels };
+          setCapturedImages(prev => 
+            prev.map(img => img.id === image.id ? updatedImage : img)
+          );
+
+          successCount++;
+        } catch (error) {
+          console.error(`Failed to paste augmentation options to ${image.filename}:`, error);
+          failCount++;
+        }
+      }
+
+      // Clear selections
+      setSelectedImages(new Set());
+      setIsMultiSelectMode(false);
+      setShowBulkAugmentationPasteDialog(false);
+
+      const totalProcessed = successCount + failCount;
+      onNotification({
+        type: successCount === totalProcessed ? 'success' : 'warning',
+        title: 'Bulk Augmentation Paste Complete',
+        message: `Successfully applied augmentation options to ${successCount} images${failCount > 0 ? `, ${failCount} failed` : ''}`
+      });
+
+    } catch (error) {
+      onNotification({
+        type: 'error',
+        title: 'Bulk Augmentation Paste Failed',
+        message: 'Failed to apply augmentation options to selected images'
       });
     } finally {
       setIsGeneratingDataset(false);
@@ -1989,7 +2075,18 @@ const DatasetCreation = ({ onNotification }) => {
                         disabled={!copiedAnnotations || selectedImages.size === 0 || !isMultiSelectMode}
                         color="secondary"
                       >
-                        Paste to Selected ({selectedImages.size})
+                        Paste Annotations ({selectedImages.size})
+                      </Button>
+                      
+                      <Button
+                        size="small"
+                        startIcon={<SettingsIcon />}
+                        onClick={() => setShowBulkAugmentationPasteDialog(true)}
+                        disabled={!copiedAugmentationOptions || selectedImages.size === 0 || !isMultiSelectMode}
+                        color="primary"
+                        variant="outlined"
+                      >
+                        Paste Augmentations ({selectedImages.size})
                       </Button>
                       
                       {copiedAnnotations && (
@@ -2007,6 +2104,16 @@ const DatasetCreation = ({ onNotification }) => {
                           color="success"
                           variant="outlined"
                           icon={<CopyIcon />}
+                        />
+                      )}
+                      
+                      {copiedAugmentationOptions && (
+                        <Chip 
+                          label={`${Object.values(copiedAugmentationOptions).filter(opt => opt?.enabled).length} augmentations copied`}
+                          size="small"
+                          color="primary"
+                          variant="outlined"
+                          icon={<SettingsIcon />}
                         />
                       )}
                     </Box>
@@ -2299,6 +2406,8 @@ const DatasetCreation = ({ onNotification }) => {
                   showCopyPaste={true}
                   imageName={selectedImage?.filename || selectedImage?.path?.split('/').pop() || 'unknown'}
                   customClasses={config.customClasses?.object_detection}
+                  copiedAugmentationOptions={copiedAugmentationOptions}
+                  onCopyAugmentationOptions={handleCopyAugmentationOptions}
                 />
               )}
               
@@ -2527,6 +2636,73 @@ const DatasetCreation = ({ onNotification }) => {
             startIcon={isGeneratingDataset ? <CircularProgress size={16} /> : <PasteIcon />}
           >
             {isGeneratingDataset ? 'Pasting...' : `Paste to ${selectedImages.size} Images`}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Bulk Augmentation Paste Confirmation Dialog */}
+      <Dialog
+        open={showBulkAugmentationPasteDialog}
+        onClose={() => setShowBulkAugmentationPasteDialog(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Bulk Paste Augmentation Options</DialogTitle>
+        <DialogContent>
+          <Alert severity="info" sx={{ mb: 2 }}>
+            You are about to apply <strong>
+              {Object.values(copiedAugmentationOptions || {}).filter(opt => opt?.enabled).length} augmentation settings
+            </strong> to <strong>{selectedImages.size} selected images</strong>.
+          </Alert>
+          
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            This will:
+            • Apply the copied augmentation options to all selected images
+            • Replace existing augmentation settings on those images
+            • Save the changes automatically to your dataset
+          </Typography>
+          
+          {copiedAugmentationOptions && (
+            <Box sx={{ p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>Augmentation Options to Apply:</Typography>
+              {Object.entries(copiedAugmentationOptions).map(([option, config]) => (
+                config?.enabled && (
+                  <Box key={option} sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                    <SettingsIcon fontSize="small" color="primary" />
+                    <Typography variant="body2">
+                      {option.charAt(0).toUpperCase() + option.slice(1)}
+                      {config.range && ` (${config.range[0]} to ${config.range[1]})`}
+                    </Typography>
+                  </Box>
+                )
+              ))}
+            </Box>
+          )}
+          
+          {isGeneratingDataset && (
+            <Box sx={{ mt: 2 }}>
+              <LinearProgress />
+              <Typography variant="caption" color="text.secondary">
+                Applying augmentation options to selected images...
+              </Typography>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button 
+            onClick={() => setShowBulkAugmentationPasteDialog(false)}
+            disabled={isGeneratingDataset}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleBulkPasteAugmentationOptions}
+            variant="contained"
+            color="primary"
+            disabled={isGeneratingDataset || selectedImages.size === 0}
+            startIcon={isGeneratingDataset ? <CircularProgress size={16} /> : <SettingsIcon />}
+          >
+            {isGeneratingDataset ? 'Applying...' : `Apply to ${selectedImages.size} Images`}
           </Button>
         </DialogActions>
       </Dialog>
