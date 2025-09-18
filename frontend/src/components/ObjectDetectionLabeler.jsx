@@ -11,7 +11,8 @@ import {
   IconButton,
   Paper,
   Grid,
-  Tooltip
+  Tooltip,
+  Checkbox
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -23,7 +24,9 @@ import {
   PanTool as PanIcon,
   Edit as LabelIcon,
   ContentCopy as CopyIcon,
-  ContentPaste as PasteIcon
+  ContentPaste as PasteIcon,
+  SelectAll as SelectAllIcon,
+  Deselect as DeselectIcon
 } from '@mui/icons-material';
 
 import { OBJECT_DETECTION_CLASSES } from '../constants/datasetTypes.js';
@@ -50,6 +53,7 @@ const ObjectDetectionLabeler = ({
   const availableClasses = customClasses || OBJECT_DETECTION_CLASSES;
   const [selectedClass, setSelectedClass] = useState(Object.keys(availableClasses)[0] || 'button');
   const [boundingBoxes, setBoundingBoxes] = useState(labels?.boundingBoxes || []);
+  const [selectedAnnotations, setSelectedAnnotations] = useState(new Set());
   
   // Debug logging for received labels and update boundingBoxes when labels change
   useEffect(() => {
@@ -60,6 +64,8 @@ const ObjectDetectionLabeler = ({
     } else {
       setBoundingBoxes([]); // Clear if no bounding boxes
     }
+    // Clear selected annotations when labels change (e.g., switching images)
+    setSelectedAnnotations(new Set());
   }, [labels]);
   const [zoom, setZoom] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 }); // Track pan offset
@@ -429,6 +435,65 @@ const ObjectDetectionLabeler = ({
     onLabelsChange(updatedLabels);
   };
 
+  const handleAnnotationSelect = (boxId, isSelected) => {
+    setSelectedAnnotations(prev => {
+      const newSelected = new Set(prev);
+      if (isSelected) {
+        newSelected.add(boxId);
+      } else {
+        newSelected.delete(boxId);
+      }
+      return newSelected;
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (selectedAnnotations.size === boundingBoxes.length) {
+      // If all are selected, deselect all
+      setSelectedAnnotations(new Set());
+    } else {
+      // Select all
+      setSelectedAnnotations(new Set(boundingBoxes.map(box => box.id)));
+    }
+  };
+
+  const handleCopySelected = () => {
+    if (selectedAnnotations.size === 0) return;
+    
+    // Filter to only selected annotations
+    const selectedBoxes = boundingBoxes.filter(box => selectedAnnotations.has(box.id));
+    
+    console.log('ObjectDetectionLabeler - Copy Selected - imageName prop:', imageName);
+    console.log('ObjectDetectionLabeler - Copy Selected - image prop (url):', typeof image === 'string' ? image.substring(0, 100) + '...' : image);
+    
+    // Try to extract filename from URL if imageName is not provided
+    let extractedName = imageName;
+    if (!extractedName && typeof image === 'string') {
+      const urlMatch = image.match(/\/([^\/]+\.jpg)$/);
+      if (urlMatch) {
+        extractedName = urlMatch[1];
+      }
+    }
+    
+    const finalImageName = extractedName || 'unknown';
+    console.log('ObjectDetectionLabeler - Copy Selected - final imageName used:', finalImageName);
+    
+    const annotationsToCopy = {
+      boundingBoxes: selectedBoxes.map(box => ({ ...box })), // Deep copy
+      imageInfo: {
+        width: canvasSize.width,
+        height: canvasSize.height,
+        imageName: finalImageName
+      }
+    };
+    
+    console.log('ObjectDetectionLabeler - Copy Selected - annotations to copy:', annotationsToCopy);
+    onCopyAnnotations(annotationsToCopy);
+    
+    // Clear selection after copying
+    setSelectedAnnotations(new Set());
+  };
+
   return (
     <Box>
       <Typography variant="h6" gutterBottom>
@@ -585,9 +650,32 @@ const ObjectDetectionLabeler = ({
               </Select>
             </FormControl>
 
-            <Typography variant="subtitle2" gutterBottom>
-              Current Annotations ({boundingBoxes.length})
-            </Typography>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+              <Typography variant="subtitle2">
+                Current Annotations ({boundingBoxes.length})
+              </Typography>
+              {boundingBoxes.length > 0 && (
+                <Box sx={{ display: 'flex', gap: 0.5 }}>
+                  <Tooltip title={selectedAnnotations.size === boundingBoxes.length ? "Deselect All" : "Select All"}>
+                    <IconButton size="small" onClick={handleSelectAll}>
+                      {selectedAnnotations.size === boundingBoxes.length ? <DeselectIcon fontSize="small" /> : <SelectAllIcon fontSize="small" />}
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title={selectedAnnotations.size === 0 ? "No annotations selected" : `Copy ${selectedAnnotations.size} selected annotation(s)`}>
+                    <span>
+                      <IconButton 
+                        size="small" 
+                        onClick={handleCopySelected}
+                        disabled={selectedAnnotations.size === 0}
+                        color="primary"
+                      >
+                        <CopyIcon fontSize="small" />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                </Box>
+              )}
+            </Box>
             
             <Box sx={{ maxHeight: 300, overflow: 'auto' }}>
               {boundingBoxes.length === 0 ? (
@@ -613,6 +701,12 @@ const ObjectDetectionLabeler = ({
                       }}
                     >
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Checkbox
+                          size="small"
+                          checked={selectedAnnotations.has(box.id)}
+                          onChange={(e) => handleAnnotationSelect(box.id, e.target.checked)}
+                          sx={{ p: 0.5 }}
+                        />
                         <Box
                           sx={{
                             width: 8,
