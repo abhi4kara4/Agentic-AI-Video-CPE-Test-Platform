@@ -1998,7 +1998,15 @@ async def generate_training_dataset(
         
         # Create training dataset directory
         training_dir = TRAINING_DIR / f"{dataset_name}_training_{request.format}"
-        training_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            training_dir.mkdir(mode=0o755, parents=True, exist_ok=True)
+            log.info(f"Training directory created: {training_dir.absolute()}")
+        except PermissionError as e:
+            log.error(f"Permission denied creating training directory: {e}")
+            raise HTTPException(status_code=500, detail=f"Permission denied creating training directory. Check Docker volume permissions.")
+        except Exception as e:
+            log.error(f"Failed to create training directory: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to create training directory: {str(e)}")
         
         # Split dataset
         import random
@@ -2062,7 +2070,15 @@ async def generate_training_dataset(
 
 # Training management endpoints
 TRAINING_DIR = Path("training")
-TRAINING_DIR.mkdir(exist_ok=True)
+try:
+    TRAINING_DIR.mkdir(mode=0o755, exist_ok=True)
+    log.info(f"Training directory created/verified: {TRAINING_DIR.absolute()}")
+except Exception as e:
+    log.warning(f"Could not create training directory: {e}")
+    # Fallback to a subdirectory in datasets
+    TRAINING_DIR = DATASETS_DIR / "training"
+    TRAINING_DIR.mkdir(mode=0o755, exist_ok=True)
+    log.info(f"Using fallback training directory: {TRAINING_DIR.absolute()}")
 
 AVAILABLE_MODELS = {
     "llava:7b": {"name": "LLaVA 7B", "size": "7B", "type": "vision-language"},
