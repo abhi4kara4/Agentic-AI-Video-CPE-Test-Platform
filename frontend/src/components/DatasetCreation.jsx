@@ -512,13 +512,25 @@ const DatasetCreation = ({ onNotification }) => {
   );
 
   const handleInitializePlatform = async () => {
-    if (!config.deviceId || !config.macAddress) {
-      onNotification({
-        type: 'error',
-        title: 'Configuration Error',
-        message: 'Please provide Device ID and MAC Address'
-      });
-      return;
+    // Validate required fields based on configuration type
+    if (config.useCustomStreamUrl) {
+      if (!config.customStreamUrl || !config.macAddress) {
+        onNotification({
+          type: 'error',
+          title: 'Configuration Error',
+          message: 'Please provide Custom Stream URL and MAC Address'
+        });
+        return;
+      }
+    } else {
+      if (!config.deviceId || !config.macAddress) {
+        onNotification({
+          type: 'error',
+          title: 'Configuration Error',
+          message: 'Please provide Device ID and MAC Address'
+        });
+        return;
+      }
     }
 
     // Check if dataset type is selected
@@ -529,8 +541,14 @@ const DatasetCreation = ({ onNotification }) => {
 
     const initializeWithDatasetType = async () => {
     try {
-      // Start video stream with cache-busting parameter
-      const streamUrl = videoAPI.getStreamUrl(config.deviceId, config.outlet, config.resolution) + `&t=${Date.now()}`;
+      // Get stream URL based on configuration type
+      let streamUrl;
+      if (config.useCustomStreamUrl) {
+        streamUrl = config.customStreamUrl + (config.customStreamUrl.includes('?') ? '&' : '?') + `t=${Date.now()}`;
+      } else {
+        streamUrl = videoAPI.getStreamUrl(config.deviceId, config.outlet, config.resolution) + `&t=${Date.now()}`;
+      }
+      
       setStreamUrl(streamUrl);
       setStreamActive(true);
       
@@ -578,8 +596,14 @@ const DatasetCreation = ({ onNotification }) => {
     // Now proceed with initialization directly (don't call handleInitializePlatform again)
     const initializeWithDatasetType = async () => {
       try {
-        // Start video stream with cache-busting parameter
-        const streamUrl = videoAPI.getStreamUrl(config.deviceId, config.outlet, config.resolution) + `&t=${Date.now()}`;
+        // Get stream URL based on configuration type
+        let streamUrl;
+        if (config.useCustomStreamUrl) {
+          streamUrl = config.customStreamUrl + (config.customStreamUrl.includes('?') ? '&' : '?') + `t=${Date.now()}`;
+        } else {
+          streamUrl = videoAPI.getStreamUrl(config.deviceId, config.outlet, config.resolution) + `&t=${Date.now()}`;
+        }
+        
         setStreamUrl(streamUrl);
         setStreamActive(true);
         
@@ -617,7 +641,14 @@ const DatasetCreation = ({ onNotification }) => {
     
     // Restart with new settings after a brief delay
     setTimeout(() => {
-      const newStreamUrl = videoAPI.getStreamUrl(config.deviceId, config.outlet, config.resolution) + `&t=${Date.now()}`;
+      // Get stream URL based on configuration type
+      let newStreamUrl;
+      if (config.useCustomStreamUrl) {
+        newStreamUrl = config.customStreamUrl + (config.customStreamUrl.includes('?') ? '&' : '?') + `t=${Date.now()}`;
+      } else {
+        newStreamUrl = videoAPI.getStreamUrl(config.deviceId, config.outlet, config.resolution) + `&t=${Date.now()}`;
+      }
+      
       setStreamUrl(newStreamUrl);
       setStreamActive(true);
       
@@ -654,12 +685,19 @@ const DatasetCreation = ({ onNotification }) => {
         });
         
         await deviceAPI.lockDevice();
+        
+        // Update device configuration with selected key set and MAC address
+        await deviceAPI.updateConfig({
+          key_set: config.keySet,
+          mac_address: config.macAddress
+        });
+        
         setDeviceLocked(true);
         setCurrentStep(2);
         onNotification({
           type: 'success',
           title: 'Device Locked',
-          message: 'Device is now under your control'
+          message: `Device locked with ${config.keySet} remote control`
         });
       }
     } catch (error) {
@@ -694,9 +732,8 @@ const DatasetCreation = ({ onNotification }) => {
           response = await deviceAPI.powerOff();
           break;
         case 'key':
-          // Extract just the key name, remove the key set prefix
-          const cleanKeyName = key.includes(':') ? key.split(':')[1] : key;
-          response = await deviceAPI.pressKey(cleanKeyName);
+          // Send the full key with key set prefix
+          response = await deviceAPI.pressKey(key);
           break;
         default:
           return;
@@ -1158,18 +1195,23 @@ const DatasetCreation = ({ onNotification }) => {
         format = 'paddleocr';
       }
 
+      // Check if augmentation is enabled in dataset settings
+      const augmentationOptions = config.augmentationOptions || {};
+      const isAugmentationEnabled = Object.values(augmentationOptions).some(option => option?.enabled === true);
+      const augmentFactor = isAugmentationEnabled ? 3 : 1; // Use factor of 3 if enabled, 1 if disabled
+
       onNotification({
         type: 'info',
         title: 'Generating Training Dataset',
-        message: `Creating ${format.toUpperCase()} format dataset with augmentation...`
+        message: `Creating ${format.toUpperCase()} format dataset${isAugmentationEnabled ? ' with augmentation' : ' without augmentation'}...`
       });
 
       const response = await datasetAPI.generateTrainingDataset(
         currentDataset.name,
         format,
         0.8, // 80% train, 20% validation
-        true, // Enable augmentation
-        3 // 3x augmentation factor
+        isAugmentationEnabled, // Use dataset's augmentation setting
+        augmentFactor // Use appropriate factor
       );
 
       onNotification({
@@ -1455,35 +1497,67 @@ const DatasetCreation = ({ onNotification }) => {
                 </Alert>
               )}
               
+              {/* Stream URL Configuration Toggle */}
+              <Box sx={{ mb: 2 }}>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={config.useCustomStreamUrl || false}
+                      onChange={(e) => setConfig(prev => ({ 
+                        ...prev, 
+                        useCustomStreamUrl: e.target.checked,
+                        customStreamUrl: e.target.checked ? prev.customStreamUrl || '' : ''
+                      }))}
+                    />
+                  }
+                  label="Use Custom Stream URL"
+                />
+              </Box>
+
               {/* Configuration Form */}
               <Box sx={{ mb: 3 }}>
-                <TextField
-                  fullWidth
-                  label="Video Device ID"
-                  value={config.deviceId}
-                  onChange={(e) => setConfig(prev => ({ ...prev, deviceId: e.target.value }))}
-                  margin="normal"
-                  size="small"
-                />
-                <TextField
-                  fullWidth
-                  label="Video Outlet"
-                  value={config.outlet}
-                  onChange={(e) => setConfig(prev => ({ ...prev, outlet: e.target.value }))}
-                  margin="normal"
-                  size="small"
-                />
-                <FormControl fullWidth margin="normal" size="small">
-                  <InputLabel>Resolution</InputLabel>
-                  <Select
-                    value={config.resolution}
-                    onChange={(e) => setConfig(prev => ({ ...prev, resolution: e.target.value }))}
-                  >
-                    <MenuItem value="704x480">704x480 (SD)</MenuItem>
-                    <MenuItem value="1280x720">1280x720 (HD)</MenuItem>
-                    <MenuItem value="1920x1080">1920x1080 (Full HD)</MenuItem>
-                  </Select>
-                </FormControl>
+                {config.useCustomStreamUrl ? (
+                  <TextField
+                    fullWidth
+                    label="Custom Stream URL"
+                    value={config.customStreamUrl || ''}
+                    onChange={(e) => setConfig(prev => ({ ...prev, customStreamUrl: e.target.value }))}
+                    margin="normal"
+                    size="small"
+                    placeholder="https://your-stream-url.com/stream"
+                    helperText="Enter the complete stream URL"
+                  />
+                ) : (
+                  <>
+                    <TextField
+                      fullWidth
+                      label="Video Device ID"
+                      value={config.deviceId}
+                      onChange={(e) => setConfig(prev => ({ ...prev, deviceId: e.target.value }))}
+                      margin="normal"
+                      size="small"
+                    />
+                    <TextField
+                      fullWidth
+                      label="Video Outlet"
+                      value={config.outlet}
+                      onChange={(e) => setConfig(prev => ({ ...prev, outlet: e.target.value }))}
+                      margin="normal"
+                      size="small"
+                    />
+                    <FormControl fullWidth margin="normal" size="small">
+                      <InputLabel>Resolution</InputLabel>
+                      <Select
+                        value={config.resolution}
+                        onChange={(e) => setConfig(prev => ({ ...prev, resolution: e.target.value }))}
+                      >
+                        <MenuItem value="704x480">704x480 (SD)</MenuItem>
+                        <MenuItem value="1280x720">1280x720 (HD)</MenuItem>
+                        <MenuItem value="1920x1080">1920x1080 (Full HD)</MenuItem>
+                      </Select>
+                    </FormControl>
+                  </>
+                )}
                 <TextField
                   fullWidth
                   label="Device MAC Address"

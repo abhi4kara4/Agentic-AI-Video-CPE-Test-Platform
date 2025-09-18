@@ -61,6 +61,7 @@ export const deviceAPI = {
   pressKeySequence: (keys, delayMs = 500) => 
     apiClient.post('/device/keys', { keys, delay_ms: delayMs }),
   getStatus: () => apiClient.get('/device/status'),
+  updateConfig: (config) => apiClient.post('/device/config/update', config),
 };
 
 // Screen Analysis API
@@ -133,6 +134,10 @@ export const datasetAPI = {
   },
   validateDataset: (datasetId) => 
     apiClient.post(`/dataset/${datasetId}/validate`),
+  
+  // Update dataset configuration
+  updateDatasetConfig: (datasetName, config) =>
+    apiClient.post(`/dataset/${datasetName}/update-config`, config),
 };
 
 // Model Training API

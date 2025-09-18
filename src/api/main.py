@@ -465,7 +465,15 @@ async def press_key(key_name: str):
         raise HTTPException(status_code=503, detail="Service not initialized")
     
     try:
-        key = KeyCommand.from_string(key_name)
+        # Handle key format with key set prefix (e.g., "SKYQ:UP" or just "UP")
+        if ':' in key_name:
+            key_set, actual_key = key_name.split(':', 1)
+            # Update device controller's key set
+            orchestrator.device_controller.key_set = key_set
+            key = KeyCommand.from_string(actual_key)
+        else:
+            key = KeyCommand.from_string(key_name)
+            
         success = await orchestrator.device_controller.press_key(key)
         
         if not success:
@@ -484,7 +492,20 @@ async def press_key_sequence(keys: List[str], delay_ms: int = 500):
         raise HTTPException(status_code=503, detail="Service not initialized")
     
     try:
-        key_commands = [KeyCommand.from_string(key) for key in keys]
+        key_commands = []
+        last_key_set = None
+        
+        for key in keys:
+            if ':' in key:
+                key_set, actual_key = key.split(':', 1)
+                # Update device controller's key set if it changes
+                if last_key_set != key_set:
+                    orchestrator.device_controller.key_set = key_set
+                    last_key_set = key_set
+                key_commands.append(KeyCommand.from_string(actual_key))
+            else:
+                key_commands.append(KeyCommand.from_string(key))
+                
         success = await orchestrator.device_controller.press_key_sequence(key_commands, delay_ms)
         
         if not success:
@@ -550,6 +571,38 @@ async def device_status():
         raise HTTPException(status_code=503, detail="Service not initialized")
     
     return orchestrator.device_controller.get_status()
+
+
+@app.post("/device/config/update")
+async def update_device_config(request: dict):
+    """Update device controller configuration"""
+    if not orchestrator:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    try:
+        # Update device controller configuration
+        device_controller = orchestrator.device_controller
+        
+        # Update key set if provided
+        if "key_set" in request:
+            device_controller.key_set = request["key_set"]
+            
+        # Update MAC address if provided
+        if "mac_address" in request:
+            device_controller.mac_address = request["mac_address"]
+            
+        return {
+            "status": "success", 
+            "message": "Device configuration updated",
+            "config": {
+                "key_set": device_controller.key_set,
+                "mac_address": device_controller.mac_address
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update device config: {str(e)}")
 
 
 # Screen analysis endpoints
@@ -800,6 +853,59 @@ async def get_dataset(dataset_name: str):
     return metadata
 
 
+@app.post("/dataset/{dataset_name}/update-config")
+async def update_dataset_config(dataset_name: str, request: dict):
+    """Update dataset configuration including augmentation options"""
+    dataset_dir = DATASETS_DIR / dataset_name
+    metadata_file = dataset_dir / "metadata.json"
+    
+    if not metadata_file.exists():
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    
+    try:
+        # Read current metadata
+        with open(metadata_file) as f:
+            metadata = json.load(f)
+        
+        # Update augmentation options if provided
+        if "augmentation_options" in request:
+            metadata["augmentation_options"] = request["augmentation_options"]
+        
+        # Update custom classes if provided
+        if "custom_classes" in request:
+            if "custom_classes" not in metadata:
+                metadata["custom_classes"] = {}
+            metadata["custom_classes"].update(request["custom_classes"])
+        
+        # Update other fields if provided
+        for field in ["description", "supported_formats"]:
+            if field in request:
+                metadata[field] = request[field]
+        
+        # Update timestamp
+        metadata["updated_at"] = datetime.now().isoformat()
+        
+        # Save updated metadata
+        with open(metadata_file, "w") as f:
+            json.dump(metadata, f, indent=2)
+        
+        # Broadcast update
+        try:
+            if manager.active_connections:
+                await broadcast_update("dataset_updated", {
+                    "dataset_name": dataset_name,
+                    "updated_fields": list(request.keys())
+                })
+        except Exception as broadcast_error:
+            log.warning(f"Failed to broadcast dataset update: {broadcast_error}")
+        
+        return {"success": True, "message": "Dataset configuration updated successfully"}
+        
+    except Exception as e:
+        log.error(f"Failed to update dataset config: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update dataset configuration: {str(e)}")
+
+
 @app.post("/dataset/{dataset_name}/capture")
 async def capture_to_dataset(dataset_name: str):
     """Capture current frame to dataset"""
@@ -1027,12 +1133,16 @@ async def generate_yolo_dataset(training_dir: Path, train_images: list, val_imag
     (training_dir / "labels" / "train").mkdir(parents=True, exist_ok=True)
     (training_dir / "labels" / "val").mkdir(parents=True, exist_ok=True)
     
-    # Object detection classes for YOLO
-    classes = [
-        "button", "tile", "menu", "dialog", "keyboard", "focused_button", "focused_tile",
-        "video_player", "progress_bar", "buffering_spinner", "closed_caption", "subtitle",
-        "rail", "tab_bar", "loading_indicator", "error_message", "notification"
-    ]
+    # Extract unique classes from actual annotations
+    classes = set()
+    for item in train_images + val_images:
+        annotation = item["annotation"]
+        if annotation.get("bounding_boxes"):
+            for bbox in annotation["bounding_boxes"]:
+                classes.add(bbox["class"])
+    
+    # Convert to sorted list for consistent ordering
+    classes = sorted(list(classes))
     
     # Write classes.txt
     with open(training_dir / "classes.txt", "w") as f:

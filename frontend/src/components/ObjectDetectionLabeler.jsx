@@ -644,7 +644,7 @@ const ObjectDetectionLabeler = ({
                 Available Classes:
               </Typography>
               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 1 }}>
-                {Object.entries(OBJECT_DETECTION_CLASSES).slice(0, 8).map(([key, cls]) => (
+                {Object.entries(availableClasses).slice(0, 8).map(([key, cls]) => (
                   <Chip
                     key={key}
                     label={cls.name}
