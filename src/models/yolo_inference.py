@@ -273,8 +273,15 @@ class ModelManager:
         models_dir = Path("training/models")
         available_models = {}
         
+        print(f"[ModelManager] Checking models directory: {models_dir.absolute()}")
+        print(f"[ModelManager] Directory exists: {models_dir.exists()}")
+        
         if not models_dir.exists():
+            print(f"[ModelManager] Models directory does not exist, returning empty list")
             return available_models
+        
+        model_dirs = list(models_dir.iterdir())
+        print(f"[ModelManager] Found {len(model_dirs)} items: {[d.name for d in model_dirs]}")
         
         for model_dir in models_dir.iterdir():
             if model_dir.is_dir():
