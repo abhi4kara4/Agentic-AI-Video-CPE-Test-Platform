@@ -668,6 +668,7 @@ const ModelTesting = ({ onNotification }) => {
   const [selectedModelType, setSelectedModelType] = useState('');
   const [testHistory, setTestHistory] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [testingProgress, setTestingProgress] = useState({ current: 0, total: 0 });
   
   // Input source states
   const [inputType, setInputType] = useState('stream'); // 'stream', 'upload', 'video'
@@ -919,12 +920,48 @@ const ModelTesting = ({ onNotification }) => {
         const response = await testingAPI.testModel(selectedModel);
         testData = response.data;
       } else if (inputType === 'upload' && uploadedImages.length > 0) {
-        // Test with first uploaded image
-        const response = await testingAPI.testModelWithUpload(
-          selectedModel, 
-          uploadedImages[0].file
-        );
-        testData = response.data;
+        // Test with all uploaded images
+        const allResults = [];
+        setTestingProgress({ current: 0, total: uploadedImages.length });
+        
+        for (let i = 0; i < uploadedImages.length; i++) {
+          const image = uploadedImages[i];
+          setTestingProgress({ current: i + 1, total: uploadedImages.length });
+          
+          try {
+            const response = await testingAPI.testModelWithUpload(
+              selectedModel, 
+              image.file
+            );
+            allResults.push({
+              ...response.data,
+              image_name: image.name,
+              image_index: i
+            });
+          } catch (error) {
+            console.error(`Error testing image ${image.name}:`, error);
+            allResults.push({
+              error: `Failed to test ${image.name}: ${error.message}`,
+              image_name: image.name,
+              image_index: i
+            });
+          }
+        }
+        
+        setTestingProgress({ current: 0, total: 0 });
+        
+        // Combine results or use the first successful one for backward compatibility
+        if (allResults.length === 1) {
+          testData = allResults[0];
+        } else {
+          // For multiple images, create a combined result
+          testData = {
+            model_name: selectedModel,
+            results: allResults,
+            total_images: uploadedImages.length,
+            successful_tests: allResults.filter(r => !r.error).length
+          };
+        }
       } else if (inputType === 'video' && uploadedVideo) {
         // Debug: Log current video analysis settings
         console.log('Current videoAnalysisSettings:', videoAnalysisSettings);
@@ -1054,11 +1091,41 @@ const ModelTesting = ({ onNotification }) => {
         const response = await testingAPI.testModel(selectedModel);
         testData = response.data;
       } else if (inputType === 'upload' && uploadedImages.length > 0) {
-        const response = await testingAPI.testModelWithUpload(
-          selectedModel, 
-          uploadedImages[0].file
-        );
-        testData = response.data;
+        // Test with all uploaded images
+        const allResults = [];
+        for (let i = 0; i < uploadedImages.length; i++) {
+          const image = uploadedImages[i];
+          try {
+            const response = await testingAPI.testModelWithUpload(
+              selectedModel, 
+              image.file
+            );
+            allResults.push({
+              ...response.data,
+              image_name: image.name,
+              image_index: i
+            });
+          } catch (error) {
+            console.error(`Error testing image ${image.name}:`, error);
+            allResults.push({
+              error: `Failed to test ${image.name}: ${error.message}`,
+              image_name: image.name,
+              image_index: i
+            });
+          }
+        }
+        
+        // Combine results
+        if (allResults.length === 1) {
+          testData = allResults[0];
+        } else {
+          testData = {
+            model_name: selectedModel,
+            results: allResults,
+            total_images: uploadedImages.length,
+            successful_tests: allResults.filter(r => !r.error).length
+          };
+        }
       } else if (inputType === 'video' && uploadedVideo) {
         // Debug: Log current video analysis settings
         console.log('Current videoAnalysisSettings:', videoAnalysisSettings);
@@ -1153,12 +1220,42 @@ const ModelTesting = ({ onNotification }) => {
         const response = await testingAPI.testModel(selectedModel, visionLLMSettings.prompt);
         testData = response.data;
       } else if (inputType === 'upload' && uploadedImages.length > 0) {
-        const response = await testingAPI.testModelWithUpload(
-          selectedModel, 
-          uploadedImages[0].file,
-          visionLLMSettings.prompt
-        );
-        testData = response.data;
+        // Test with all uploaded images
+        const allResults = [];
+        for (let i = 0; i < uploadedImages.length; i++) {
+          const image = uploadedImages[i];
+          try {
+            const response = await testingAPI.testModelWithUpload(
+              selectedModel, 
+              image.file,
+              visionLLMSettings.prompt
+            );
+            allResults.push({
+              ...response.data,
+              image_name: image.name,
+              image_index: i
+            });
+          } catch (error) {
+            console.error(`Error testing image ${image.name}:`, error);
+            allResults.push({
+              error: `Failed to test ${image.name}: ${error.message}`,
+              image_name: image.name,
+              image_index: i
+            });
+          }
+        }
+        
+        // Combine results
+        if (allResults.length === 1) {
+          testData = allResults[0];
+        } else {
+          testData = {
+            model_name: selectedModel,
+            results: allResults,
+            total_images: uploadedImages.length,
+            successful_tests: allResults.filter(r => !r.error).length
+          };
+        }
       } else if (inputType === 'video' && uploadedVideo) {
         const response = await testingAPI.testModel(selectedModel, visionLLMSettings.prompt);
         testData = response.data;
@@ -1227,12 +1324,42 @@ const ModelTesting = ({ onNotification }) => {
         const response = await testingAPI.testPaddleOCRModel(selectedModel, null, paddleOCRSettings);
         testData = response.data;
       } else if (inputType === 'upload' && uploadedImages.length > 0) {
-        const response = await testingAPI.testPaddleOCRModelWithUpload(
-          selectedModel, 
-          uploadedImages[0].file,
-          paddleOCRSettings
-        );
-        testData = response.data;
+        // Test with all uploaded images
+        const allResults = [];
+        for (let i = 0; i < uploadedImages.length; i++) {
+          const image = uploadedImages[i];
+          try {
+            const response = await testingAPI.testPaddleOCRModelWithUpload(
+              selectedModel, 
+              image.file,
+              paddleOCRSettings
+            );
+            allResults.push({
+              ...response.data,
+              image_name: image.name,
+              image_index: i
+            });
+          } catch (error) {
+            console.error(`Error testing image ${image.name}:`, error);
+            allResults.push({
+              error: `Failed to test ${image.name}: ${error.message}`,
+              image_name: image.name,
+              image_index: i
+            });
+          }
+        }
+        
+        // Combine results
+        if (allResults.length === 1) {
+          testData = allResults[0];
+        } else {
+          testData = {
+            model_name: selectedModel,
+            results: allResults,
+            total_images: uploadedImages.length,
+            successful_tests: allResults.filter(r => !r.error).length
+          };
+        }
       } else if (inputType === 'video' && uploadedVideo) {
         const videoOptions = {
           language: paddleOCRSettings.language,
@@ -1797,7 +1924,13 @@ const ModelTesting = ({ onNotification }) => {
                       disabled={loading || !selectedModel}
                       sx={{ mb: 2 }}
                     >
-                      {loading ? 'Detecting...' : 'Run Object Detection'}
+                      {loading 
+                        ? (testingProgress.total > 1 
+                            ? `Detecting... (${testingProgress.current}/${testingProgress.total})` 
+                            : 'Detecting...'
+                          ) 
+                        : 'Run Object Detection'
+                      }
                     </Button>
                     
                     {inputType === 'stream' && (
@@ -1874,7 +2007,13 @@ const ModelTesting = ({ onNotification }) => {
                       disabled={loading || !selectedModel}
                       sx={{ mb: 2 }}
                     >
-                      {loading ? 'Classifying...' : 'Run Classification'}
+                      {loading 
+                        ? (testingProgress.total > 1 
+                            ? `Classifying... (${testingProgress.current}/${testingProgress.total})` 
+                            : 'Classifying...'
+                          ) 
+                        : 'Run Classification'
+                      }
                     </Button>
                     
                     {inputType === 'stream' && (
@@ -1962,7 +2101,13 @@ const ModelTesting = ({ onNotification }) => {
                       disabled={loading || !selectedModel}
                       sx={{ mb: 2 }}
                     >
-                      {loading ? 'Analyzing...' : 'Analyze with Vision LLM'}
+                      {loading 
+                        ? (testingProgress.total > 1 
+                            ? `Analyzing... (${testingProgress.current}/${testingProgress.total})` 
+                            : 'Analyzing...'
+                          ) 
+                        : 'Analyze with Vision LLM'
+                      }
                     </Button>
                     
                     {inputType === 'stream' && (
@@ -2081,7 +2226,13 @@ const ModelTesting = ({ onNotification }) => {
                       disabled={loading || !selectedModel}
                       sx={{ mb: 2 }}
                     >
-                      {loading ? 'Processing...' : 'Run Text Analysis'}
+                      {loading 
+                        ? (testingProgress.total > 1 
+                            ? `Processing... (${testingProgress.current}/${testingProgress.total})` 
+                            : 'Processing...'
+                          ) 
+                        : 'Run Text Analysis'
+                      }
                     </Button>
 
                     <Button
