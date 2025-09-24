@@ -67,6 +67,13 @@ const ObjectDetectionLabeler = ({
     labels?.augmentationOptions || AUGMENTATION_OPTIONS[DATASET_TYPES.OBJECT_DETECTION] || {}
   );
   
+  // New states for hover highlighting and dragging
+  const [hoveredBoxId, setHoveredBoxId] = useState(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragBoxId, setDragBoxId] = useState(null);
+  const [dragStart, setDragStart] = useState(null);
+  const [dragBoxOriginal, setDragBoxOriginal] = useState(null);
+  
   // Debug logging for received labels and update boundingBoxes when labels change
   useEffect(() => {
     console.log('ObjectDetectionLabeler received labels:', labels);
@@ -94,7 +101,7 @@ const ObjectDetectionLabeler = ({
     if (imageLoaded) {
       drawCanvas();
     }
-  }, [boundingBoxes, zoom, imageLoaded, panOffset]);
+  }, [boundingBoxes, zoom, imageLoaded, panOffset, hoveredBoxId, dragBoxId, dragStart, dragBoxOriginal]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -128,6 +135,12 @@ const ObjectDetectionLabeler = ({
               setIsPanning(false);
               setPanStart(null);
             }
+            if (isDragging) {
+              setIsDragging(false);
+              setDragBoxId(null);
+              setDragStart(null);
+              setDragBoxOriginal(null);
+            }
             event.preventDefault();
             break;
         }
@@ -136,7 +149,7 @@ const ObjectDetectionLabeler = ({
 
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [isDrawing, isPanning]);
+  }, [isDrawing, isPanning, isDragging]);
 
   useEffect(() => {
     onLabelsChange({
@@ -221,28 +234,57 @@ const ObjectDetectionLabeler = ({
     // Draw existing bounding boxes
     boundingBoxes.forEach((box, index) => {
       const cls = availableClasses[box.class];
+      const isHovered = hoveredBoxId === box.id;
+      const isDraggedBox = dragBoxId === box.id;
+      
+      // Enhanced styling for hovered/dragged boxes
+      if (isHovered || isDraggedBox) {
+        // Draw glow effect
+        ctx.shadowColor = cls?.color || '#FF0000';
+        ctx.shadowBlur = 15;
+        ctx.lineWidth = 4;
+      } else {
+        ctx.shadowBlur = 0;
+        ctx.lineWidth = 2;
+      }
+      
       ctx.strokeStyle = cls?.color || '#FF0000';
-      ctx.lineWidth = 2;
+      
+      // Calculate box position (use dragged position if being dragged)
+      let boxX = box.x;
+      let boxY = box.y;
+      
+      if (isDraggedBox && dragStart && dragBoxOriginal) {
+        // Apply drag offset
+        const dragOffsetX = (dragStart.currentX - dragStart.startX) / drawWidth;
+        const dragOffsetY = (dragStart.currentY - dragStart.startY) / drawHeight;
+        boxX = dragBoxOriginal.x + dragOffsetX;
+        boxY = dragBoxOriginal.y + dragOffsetY;
+      }
+      
       ctx.strokeRect(
-        offsetX + (box.x * drawWidth),
-        offsetY + (box.y * drawHeight),
+        offsetX + (boxX * drawWidth),
+        offsetY + (boxY * drawHeight),
         box.width * drawWidth,
         box.height * drawHeight
       );
 
       // Draw label background
       const labelText = cls?.name || box.class;
-      ctx.font = '12px Arial';
+      ctx.font = isHovered || isDraggedBox ? '14px Arial' : '12px Arial';
       const textMetrics = ctx.measureText(labelText);
-      const labelX = offsetX + (box.x * drawWidth);
-      const labelY = offsetY + (box.y * drawHeight) - 5;
+      const labelX = offsetX + (boxX * drawWidth);
+      const labelY = offsetY + (boxY * drawHeight) - 5;
       
       ctx.fillStyle = cls?.color || '#FF0000';
-      ctx.fillRect(labelX, labelY - 12, textMetrics.width + 4, 14);
+      ctx.fillRect(labelX, labelY - (isHovered || isDraggedBox ? 14 : 12), textMetrics.width + 4, isHovered || isDraggedBox ? 16 : 14);
       
       // Draw label text
       ctx.fillStyle = 'white';
       ctx.fillText(labelText, labelX + 2, labelY);
+      
+      // Reset shadow for next box
+      ctx.shadowBlur = 0;
     });
 
     // Draw current drawing box
@@ -270,6 +312,35 @@ const ObjectDetectionLabeler = ({
     };
   };
 
+  const findBoxAtPosition = (canvasPos) => {
+    const { offsetX, offsetY, drawWidth, drawHeight } = imageParams;
+    
+    // Convert canvas position to image coordinates
+    const imageX = (canvasPos.x - offsetX) / drawWidth;
+    const imageY = (canvasPos.y - offsetY) / drawHeight;
+    
+    // Check each bounding box (in reverse order to prioritize top boxes)
+    for (let i = boundingBoxes.length - 1; i >= 0; i--) {
+      const box = boundingBoxes[i];
+      if (imageX >= box.x && imageX <= box.x + box.width &&
+          imageY >= box.y && imageY <= box.y + box.height) {
+        return box;
+      }
+    }
+    return null;
+  };
+
+  const getCursorStyle = () => {
+    if (interactionMode === 'pan') {
+      return isPanning ? 'grabbing' : 'grab';
+    }
+    if (isDragging) {
+      return 'grabbing';
+    }
+    // For label mode, we'll dynamically check on mouse move
+    return 'crosshair';
+  };
+
   const handleMouseDown = (event) => {
     const pos = getCanvasCoordinates(event);
     
@@ -277,8 +348,25 @@ const ObjectDetectionLabeler = ({
       setIsPanning(true);
       setPanStart(pos);
     } else {
-      setIsDrawing(true);
-      setStartPos(pos);
+      // Check if clicking on an existing box for dragging
+      const clickedBox = findBoxAtPosition(pos);
+      
+      if (clickedBox) {
+        // Start dragging existing box
+        setIsDragging(true);
+        setDragBoxId(clickedBox.id);
+        setDragBoxOriginal({ ...clickedBox });
+        setDragStart({
+          startX: pos.x,
+          startY: pos.y,
+          currentX: pos.x,
+          currentY: pos.y
+        });
+      } else {
+        // Start drawing new box
+        setIsDrawing(true);
+        setStartPos(pos);
+      }
     }
   };
 
@@ -296,6 +384,16 @@ const ObjectDetectionLabeler = ({
       }));
       
       setPanStart(pos);
+      return;
+    }
+    
+    if (isDragging && dragStart) {
+      // Handle box dragging
+      setDragStart(prev => ({
+        ...prev,
+        currentX: pos.x,
+        currentY: pos.y
+      }));
       return;
     }
     
@@ -324,6 +422,30 @@ const ObjectDetectionLabeler = ({
     if (isPanning) {
       setIsPanning(false);
       setPanStart(null);
+      return;
+    }
+    
+    if (isDragging) {
+      // Complete drag operation
+      if (dragBoxId && dragStart && dragBoxOriginal) {
+        const { offsetX, offsetY, drawWidth, drawHeight } = imageParams;
+        
+        // Calculate new position
+        const dragOffsetX = (dragStart.currentX - dragStart.startX) / drawWidth;
+        const dragOffsetY = (dragStart.currentY - dragStart.startY) / drawHeight;
+        const newX = Math.max(0, Math.min(1 - dragBoxOriginal.width, dragBoxOriginal.x + dragOffsetX));
+        const newY = Math.max(0, Math.min(1 - dragBoxOriginal.height, dragBoxOriginal.y + dragOffsetY));
+        
+        // Update the box position
+        setBoundingBoxes(prev => prev.map(box => 
+          box.id === dragBoxId ? { ...box, x: newX, y: newY } : box
+        ));
+      }
+      
+      setIsDragging(false);
+      setDragBoxId(null);
+      setDragStart(null);
+      setDragBoxOriginal(null);
       return;
     }
     
@@ -550,7 +672,7 @@ const ObjectDetectionLabeler = ({
                   color={interactionMode === 'label' ? 'primary' : 'secondary'}
                   size="small"
                 />
-                {interactionMode === 'label' ? 'Draw bounding boxes' : 'Pan around image'}
+                {interactionMode === 'label' ? 'Draw new boxes or drag existing ones' : 'Pan around image'}
               </Typography>
               <Box sx={{ display: 'flex', gap: 0.5 }}>
                 <Tooltip title={`Switch to ${interactionMode === 'label' ? 'Pan' : 'Label'} Mode`}>
@@ -638,7 +760,7 @@ const ObjectDetectionLabeler = ({
                 height={canvasSize.height}
                 style={{ 
                   display: 'block', 
-                  cursor: interactionMode === 'label' ? 'crosshair' : (isPanning ? 'grabbing' : 'grab'),
+                  cursor: getCursorStyle(),
                   maxWidth: '100%',
                   userSelect: 'none'
                 }}
@@ -733,10 +855,15 @@ const ObjectDetectionLabeler = ({
                         p: 1,
                         mb: 1,
                         border: '1px solid',
-                        borderColor: 'divider',
+                        borderColor: hoveredBoxId === box.id ? cls?.color : 'divider',
                         borderRadius: 1,
-                        fontSize: '0.8rem'
+                        fontSize: '0.8rem',
+                        backgroundColor: hoveredBoxId === box.id ? `${cls?.color}10` : 'transparent',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease-in-out'
                       }}
+                      onMouseEnter={() => setHoveredBoxId(box.id)}
+                      onMouseLeave={() => setHoveredBoxId(null)}
                     >
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         <Checkbox
