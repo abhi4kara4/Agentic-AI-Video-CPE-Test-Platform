@@ -70,8 +70,19 @@ const ClassManagement = ({
     setLoading(true);
     try {
       const response = await datasetAPI.getDatasetClasses(datasetName);
-      setClasses(response.data.classes);
+      
+      // Get both used classes and defined custom classes
+      const usedClasses = response.data.classes || [];
+      const customClasses = response.data.custom_classes || {};
+      
+      // Combine used classes with defined custom classes
+      const allClasses = new Set([
+        ...usedClasses,
+        ...Object.keys(customClasses)
+      ]);
+      setClasses(Array.from(allClasses));
     } catch (error) {
+      console.error('Class management load error:', error);
       onNotification({
         type: 'error',
         title: 'Load Error',
@@ -164,8 +175,16 @@ const ClassManagement = ({
     }
   };
 
-  const getRandomColor = () => {
-    return colorPalette[Math.floor(Math.random() * colorPalette.length)];
+  const getColorForClass = (className) => {
+    // Generate consistent color based on class name hash
+    let hash = 0;
+    for (let i = 0; i < className.length; i++) {
+      const char = className.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32bit integer
+    }
+    const index = Math.abs(hash) % colorPalette.length;
+    return colorPalette[index];
   };
 
   return (
@@ -255,7 +274,7 @@ const ClassManagement = ({
                                 label={className}
                                 size="small"
                                 sx={{ 
-                                  backgroundColor: getRandomColor(),
+                                  backgroundColor: getColorForClass(className),
                                   color: 'white'
                                 }}
                               />

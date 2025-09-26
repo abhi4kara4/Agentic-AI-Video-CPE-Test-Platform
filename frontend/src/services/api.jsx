@@ -90,6 +90,7 @@ export const datasetAPI = {
     }),
   listDatasets: () => apiClient.get('/dataset/list'),
   getDataset: (datasetId) => apiClient.get(`/dataset/${datasetId}`),
+  getDatasetByName: (datasetName) => apiClient.get(`/dataset/${datasetName}`),
   deleteDataset: (datasetId) => apiClient.delete(`/dataset/${datasetId}`),
   
   // Image management

@@ -2140,23 +2140,48 @@ async def get_dataset_classes(dataset_name: str):
                 continue
                 
             image_data = safe_json_load(image_file)
+            
+            # Check both direct labels and label_data structure
             labels = image_data.get("labels", {})
+            label_data = image_data.get("label_data", {})
             
             if dataset_type == "object_detection":
+                # Check in direct labels first
                 bounding_boxes = labels.get("boundingBoxes", [])
                 for box in bounding_boxes:
                     if box.get("class"):
                         classes_used.add(box["class"])
+                
+                # Also check in label_data.labels structure
+                if label_data and "labels" in label_data:
+                    nested_labels = label_data["labels"]
+                    nested_bounding_boxes = nested_labels.get("boundingBoxes", [])
+                    for box in nested_bounding_boxes:
+                        if box.get("class"):
+                            classes_used.add(box["class"])
+                            
             elif dataset_type == "image_classification":
                 class_name = labels.get("className")
                 if class_name:
                     classes_used.add(class_name)
+                
+                # Also check in label_data.labels structure
+                if label_data and "labels" in label_data:
+                    nested_labels = label_data["labels"]
+                    nested_class_name = nested_labels.get("className")
+                    if nested_class_name:
+                        classes_used.add(nested_class_name)
+        
+        # Also get custom classes from metadata
+        custom_classes = metadata.get("customClasses", {})
         
         return {
             "dataset_name": dataset_name,
             "dataset_type": dataset_type,
             "classes": list(classes_used),
-            "total_classes": len(classes_used)
+            "total_classes": len(classes_used),
+            "custom_classes": custom_classes,
+            "metadata": metadata
         }
         
     except HTTPException:
@@ -2192,21 +2217,42 @@ async def rename_class_in_dataset(dataset_name: str, request: RenameClassRequest
                 
             image_data = safe_json_load(image_file)
             labels = image_data.get("labels", {})
+            label_data = image_data.get("label_data", {})
             file_updated = False
             
             if dataset_type == "object_detection":
+                # Update direct labels
                 bounding_boxes = labels.get("boundingBoxes", [])
                 for box in bounding_boxes:
                     if box.get("class") == request.old_class_name:
                         box["class"] = request.new_class_name
                         updated_annotations += 1
                         file_updated = True
+                
+                # Update nested label_data.labels structure
+                if label_data and "labels" in label_data:
+                    nested_labels = label_data["labels"]
+                    nested_bounding_boxes = nested_labels.get("boundingBoxes", [])
+                    for box in nested_bounding_boxes:
+                        if box.get("class") == request.old_class_name:
+                            box["class"] = request.new_class_name
+                            updated_annotations += 1
+                            file_updated = True
                         
             elif dataset_type == "image_classification":
+                # Update direct labels
                 if labels.get("className") == request.old_class_name:
                     labels["className"] = request.new_class_name
                     updated_annotations += 1
                     file_updated = True
+                
+                # Update nested label_data.labels structure
+                if label_data and "labels" in label_data:
+                    nested_labels = label_data["labels"]
+                    if nested_labels.get("className") == request.old_class_name:
+                        nested_labels["className"] = request.new_class_name
+                        updated_annotations += 1
+                        file_updated = True
             
             if file_updated:
                 # Save updated file
@@ -2262,6 +2308,8 @@ async def add_class_to_dataset(dataset_name: str, request: AddClassRequest):
             }
             
             metadata["customClasses"] = custom_classes
+            
+            log.info(f"Updated custom classes: {custom_classes}")
             
             # Save updated metadata
             with open(metadata_file, 'w', encoding='utf-8') as f:

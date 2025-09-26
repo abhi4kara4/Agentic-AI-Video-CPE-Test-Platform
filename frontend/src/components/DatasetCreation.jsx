@@ -435,8 +435,10 @@ const DatasetCreation = ({ onNotification }) => {
   // Load custom classes from dataset metadata
   const loadDatasetCustomClasses = async (datasetName) => {
     try {
-      const response = await datasetAPI.getDataset(datasetName);
-      const metadata = response.data?.metadata || {};
+      const response = await datasetAPI.getDatasetByName(datasetName);
+      const metadata = response.data || {};
+      
+      console.log('Loaded dataset metadata:', metadata); // Debug log
       
       // Update config with custom classes from dataset metadata
       if (metadata.customClasses) {

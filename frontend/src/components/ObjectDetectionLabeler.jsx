@@ -58,9 +58,24 @@ const ObjectDetectionLabeler = ({
   const [panStart, setPanStart] = useState(null);
   const [startPos, setStartPos] = useState(null);
   const [currentBox, setCurrentBox] = useState(null);
-  // Use custom classes if provided, otherwise fall back to defaults
-  const availableClasses = customClasses || OBJECT_DETECTION_CLASSES;
+  // Merge custom classes with default classes
+  const availableClasses = customClasses 
+    ? { ...OBJECT_DETECTION_CLASSES, ...customClasses }
+    : OBJECT_DETECTION_CLASSES;
+  
+  // Log when custom classes are provided for debugging
+  if (customClasses) {
+    console.log('ObjectDetectionLabeler - Using custom classes:', Object.keys(customClasses));
+  }
   const [selectedClass, setSelectedClass] = useState(Object.keys(availableClasses)[0] || 'button');
+  
+  // Update selected class when available classes change
+  useEffect(() => {
+    const currentKeys = Object.keys(availableClasses);
+    if (currentKeys.length > 0 && !currentKeys.includes(selectedClass)) {
+      setSelectedClass(currentKeys[0]);
+    }
+  }, [availableClasses, selectedClass]);
   const [boundingBoxes, setBoundingBoxes] = useState(labels?.boundingBoxes || []);
   const [selectedAnnotations, setSelectedAnnotations] = useState(new Set());
   const [augmentationOptions, setAugmentationOptions] = useState(
@@ -289,7 +304,7 @@ const ObjectDetectionLabeler = ({
 
     // Draw current drawing box
     if (currentBox) {
-      const cls = OBJECT_DETECTION_CLASSES[selectedClass];
+      const cls = availableClasses[selectedClass];
       ctx.strokeStyle = cls?.color || '#FF0000';
       ctx.lineWidth = 2;
       ctx.setLineDash([5, 5]);
