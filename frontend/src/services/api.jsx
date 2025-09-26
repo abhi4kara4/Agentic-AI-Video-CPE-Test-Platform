@@ -140,6 +140,24 @@ export const datasetAPI = {
   // Update dataset configuration
   updateDatasetConfig: (datasetName, config) =>
     apiClient.post(`/dataset/${datasetName}/update-config`, config),
+  
+  // Class management
+  getDatasetClasses: (datasetName) =>
+    apiClient.get(`/dataset/${datasetName}/classes`),
+  renameClassInDataset: (datasetName, oldClassName, newClassName) =>
+    apiClient.post(`/dataset/${datasetName}/classes/rename`, {
+      old_class_name: oldClassName,
+      new_class_name: newClassName
+    }),
+  addClassToDataset: (datasetName, className, color = null) =>
+    apiClient.post(`/dataset/${datasetName}/classes/add`, {
+      class_name: className,
+      color: color
+    }),
+  bulkClassOperations: (datasetName, operations) =>
+    apiClient.post(`/dataset/${datasetName}/classes/bulk-operations`, {
+      operations: operations
+    }),
 };
 
 // Model Training API

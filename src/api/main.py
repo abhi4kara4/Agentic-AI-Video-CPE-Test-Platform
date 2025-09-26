@@ -2102,6 +2102,231 @@ async def generate_training_dataset(
         raise HTTPException(status_code=500, detail=f"Failed to generate training dataset: {str(e)}")
 
 
+# Class management models
+class RenameClassRequest(BaseModel):
+    old_class_name: str
+    new_class_name: str
+
+class AddClassRequest(BaseModel):
+    class_name: str
+    color: Optional[str] = None
+
+class BulkClassOperationRequest(BaseModel):
+    operations: List[Dict[str, Any]]  # List of rename/add operations
+
+
+# Class management endpoints
+@app.get("/dataset/{dataset_name}/classes")
+async def get_dataset_classes(dataset_name: str):
+    """Get all classes used in a dataset"""
+    try:
+        dataset_dir = DATASETS_DIR / dataset_name
+        if not dataset_dir.exists():
+            raise HTTPException(status_code=404, detail="Dataset not found")
+        
+        # Get metadata to determine dataset type
+        metadata_file = dataset_dir / "metadata.json"
+        if not metadata_file.exists():
+            raise HTTPException(status_code=404, detail="Dataset metadata not found")
+        
+        metadata = safe_json_load(metadata_file)
+        dataset_type = metadata.get("datasetType", "object_detection")
+        
+        # Collect all classes from labeled images
+        classes_used = set()
+        
+        for image_file in dataset_dir.glob("*.json"):
+            if image_file.name == "metadata.json":
+                continue
+                
+            image_data = safe_json_load(image_file)
+            labels = image_data.get("labels", {})
+            
+            if dataset_type == "object_detection":
+                bounding_boxes = labels.get("boundingBoxes", [])
+                for box in bounding_boxes:
+                    if box.get("class"):
+                        classes_used.add(box["class"])
+            elif dataset_type == "image_classification":
+                class_name = labels.get("className")
+                if class_name:
+                    classes_used.add(class_name)
+        
+        return {
+            "dataset_name": dataset_name,
+            "dataset_type": dataset_type,
+            "classes": list(classes_used),
+            "total_classes": len(classes_used)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Error getting dataset classes: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting dataset classes: {str(e)}")
+
+
+@app.post("/dataset/{dataset_name}/classes/rename")
+async def rename_class_in_dataset(dataset_name: str, request: RenameClassRequest):
+    """Rename a class across all images in a dataset"""
+    try:
+        dataset_dir = DATASETS_DIR / dataset_name
+        if not dataset_dir.exists():
+            raise HTTPException(status_code=404, detail="Dataset not found")
+        
+        # Get metadata to determine dataset type
+        metadata_file = dataset_dir / "metadata.json"
+        if not metadata_file.exists():
+            raise HTTPException(status_code=404, detail="Dataset metadata not found")
+        
+        metadata = safe_json_load(metadata_file)
+        dataset_type = metadata.get("datasetType", "object_detection")
+        
+        updated_files = 0
+        updated_annotations = 0
+        
+        # Process all image JSON files
+        for image_file in dataset_dir.glob("*.json"):
+            if image_file.name == "metadata.json":
+                continue
+                
+            image_data = safe_json_load(image_file)
+            labels = image_data.get("labels", {})
+            file_updated = False
+            
+            if dataset_type == "object_detection":
+                bounding_boxes = labels.get("boundingBoxes", [])
+                for box in bounding_boxes:
+                    if box.get("class") == request.old_class_name:
+                        box["class"] = request.new_class_name
+                        updated_annotations += 1
+                        file_updated = True
+                        
+            elif dataset_type == "image_classification":
+                if labels.get("className") == request.old_class_name:
+                    labels["className"] = request.new_class_name
+                    updated_annotations += 1
+                    file_updated = True
+            
+            if file_updated:
+                # Save updated file
+                with open(image_file, 'w', encoding='utf-8') as f:
+                    json.dump(image_data, f, indent=2)
+                updated_files += 1
+        
+        log.info(f"Renamed class '{request.old_class_name}' to '{request.new_class_name}' in {updated_files} files, {updated_annotations} annotations")
+        
+        return {
+            "message": f"Successfully renamed class '{request.old_class_name}' to '{request.new_class_name}'",
+            "updated_files": updated_files,
+            "updated_annotations": updated_annotations
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Error renaming class: {e}")
+        raise HTTPException(status_code=500, detail=f"Error renaming class: {str(e)}")
+
+
+@app.post("/dataset/{dataset_name}/classes/add")
+async def add_class_to_dataset(dataset_name: str, request: AddClassRequest):
+    """Add a new class to dataset metadata"""
+    try:
+        dataset_dir = DATASETS_DIR / dataset_name
+        if not dataset_dir.exists():
+            raise HTTPException(status_code=404, detail="Dataset not found")
+        
+        # Get metadata
+        metadata_file = dataset_dir / "metadata.json"
+        if not metadata_file.exists():
+            raise HTTPException(status_code=404, detail="Dataset metadata not found")
+        
+        metadata = safe_json_load(metadata_file)
+        
+        # Add class to custom classes if not already present
+        custom_classes = metadata.get("customClasses", {})
+        
+        if request.class_name not in custom_classes:
+            # Generate color if not provided
+            color = request.color or f"#{hash(request.class_name) % 0xFFFFFF:06x}"
+            
+            # Find next available ID
+            existing_ids = [cls.get("id", 0) for cls in custom_classes.values() if isinstance(cls, dict)]
+            next_id = max(existing_ids, default=-1) + 1
+            
+            custom_classes[request.class_name] = {
+                "id": next_id,
+                "name": request.class_name,
+                "color": color
+            }
+            
+            metadata["customClasses"] = custom_classes
+            
+            # Save updated metadata
+            with open(metadata_file, 'w', encoding='utf-8') as f:
+                json.dump(metadata, f, indent=2)
+            
+            log.info(f"Added new class '{request.class_name}' to dataset '{dataset_name}'")
+            
+            return {
+                "message": f"Successfully added class '{request.class_name}'",
+                "class_info": custom_classes[request.class_name]
+            }
+        else:
+            return {
+                "message": f"Class '{request.class_name}' already exists",
+                "class_info": custom_classes[request.class_name]
+            }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Error adding class: {e}")
+        raise HTTPException(status_code=500, detail=f"Error adding class: {str(e)}")
+
+
+@app.post("/dataset/{dataset_name}/classes/bulk-operations")
+async def bulk_class_operations(dataset_name: str, request: BulkClassOperationRequest):
+    """Perform bulk class operations (rename and add)"""
+    try:
+        dataset_dir = DATASETS_DIR / dataset_name
+        if not dataset_dir.exists():
+            raise HTTPException(status_code=404, detail="Dataset not found")
+        
+        results = []
+        
+        for operation in request.operations:
+            op_type = operation.get("type")
+            
+            if op_type == "rename":
+                rename_req = RenameClassRequest(
+                    old_class_name=operation["old_class_name"],
+                    new_class_name=operation["new_class_name"]
+                )
+                result = await rename_class_in_dataset(dataset_name, rename_req)
+                results.append({"operation": "rename", "result": result})
+                
+            elif op_type == "add":
+                add_req = AddClassRequest(
+                    class_name=operation["class_name"],
+                    color=operation.get("color")
+                )
+                result = await add_class_to_dataset(dataset_name, add_req)
+                results.append({"operation": "add", "result": result})
+        
+        return {
+            "message": f"Completed {len(request.operations)} bulk operations",
+            "results": results
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Error performing bulk operations: {e}")
+        raise HTTPException(status_code=500, detail=f"Error performing bulk operations: {str(e)}")
+
+
 # Training management endpoints
 TRAINING_DIR = Path("training")
 try:

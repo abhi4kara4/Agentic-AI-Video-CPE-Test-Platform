@@ -57,6 +57,7 @@ import {
   CheckBox as CheckedIcon,
   Deselect as DeselectIcon,
   Settings as SettingsIcon,
+  Class as ClassIcon,
 } from '@mui/icons-material';
 import { videoAPI, deviceAPI, datasetAPI } from '../services/api.jsx';
 import { useDatasetCreation } from '../context/DatasetCreationContext.jsx';
@@ -64,6 +65,7 @@ import DatasetTypeSelector from './DatasetTypeSelector.jsx';
 import ObjectDetectionLabeler from './ObjectDetectionLabeler.jsx';
 import ImageClassificationLabeler from './ImageClassificationLabeler.jsx';
 import PaddleOCRLabeler from './PaddleOCRLabeler.jsx';
+import ClassManagement from './ClassManagement.jsx';
 import { DATASET_TYPE_INFO, DATASET_TYPES } from '../constants/datasetTypes.js';
 
 // Screen state definitions
@@ -215,6 +217,9 @@ const DatasetCreation = ({ onNotification }) => {
   const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
   const [showBulkPasteDialog, setShowBulkPasteDialog] = useState(false);
   const [showBulkAugmentationPasteDialog, setShowBulkAugmentationPasteDialog] = useState(false);
+  
+  // Class management state
+  const [showClassManagement, setShowClassManagement] = useState(false);
 
   // Load datasets on component mount
   useEffect(() => {
@@ -244,6 +249,13 @@ const DatasetCreation = ({ onNotification }) => {
       validateAndRefreshImages();
     }
   }, []);
+
+  // Load custom classes when dataset changes
+  useEffect(() => {
+    if (currentDataset?.name) {
+      loadDatasetCustomClasses(currentDataset.name);
+    }
+  }, [currentDataset]);
 
   // Validate and refresh images after Docker restart
   const validateAndRefreshImages = async () => {
@@ -417,6 +429,27 @@ const DatasetCreation = ({ onNotification }) => {
       console.error('Failed to load datasets:', error);
       setDatasets([]);
       setCurrentDataset(null);
+    }
+  };
+
+  // Load custom classes from dataset metadata
+  const loadDatasetCustomClasses = async (datasetName) => {
+    try {
+      const response = await datasetAPI.getDataset(datasetName);
+      const metadata = response.data?.metadata || {};
+      
+      // Update config with custom classes from dataset metadata
+      if (metadata.customClasses) {
+        setConfig(prev => ({
+          ...prev,
+          customClasses: {
+            ...prev.customClasses,
+            object_detection: metadata.customClasses
+          }
+        }));
+      }
+    } catch (error) {
+      console.error('Failed to load dataset custom classes:', error);
     }
   };
 
@@ -1957,6 +1990,15 @@ const DatasetCreation = ({ onNotification }) => {
                       color="success"
                       size="small"
                     />
+                    <Button
+                      variant="outlined"
+                      startIcon={<ClassIcon />}
+                      onClick={() => setShowClassManagement(true)}
+                      size="small"
+                      color="secondary"
+                    >
+                      Manage Classes
+                    </Button>
                   </Box>
                 </Box>
               )}
@@ -2706,6 +2748,20 @@ const DatasetCreation = ({ onNotification }) => {
           </Button>
         </DialogActions>
       </Dialog>
+      
+      {/* Class Management Dialog */}
+      <ClassManagement
+        open={showClassManagement}
+        onClose={() => setShowClassManagement(false)}
+        datasetName={currentDataset?.name}
+        onNotification={onNotification}
+        onClassesUpdated={() => {
+          // Reload custom classes when they are updated
+          if (currentDataset?.name) {
+            loadDatasetCustomClasses(currentDataset.name);
+          }
+        }}
+      />
     </Box>
   );
 };
