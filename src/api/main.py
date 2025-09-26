@@ -2210,21 +2210,38 @@ async def rename_class_in_dataset(dataset_name: str, request: RenameClassRequest
         updated_files = 0
         updated_annotations = 0
         
+        # Debug: count total files
+        all_json_files = list(dataset_dir.glob("*.json"))
+        non_metadata_files = [f for f in all_json_files if f.name != "metadata.json"]
+        log.info(f"Processing {len(non_metadata_files)} image JSON files for class rename")
+        
         # Process all image JSON files
         for image_file in dataset_dir.glob("*.json"):
             if image_file.name == "metadata.json":
                 continue
                 
+            log.info(f"Processing file: {image_file.name}")
             image_data = safe_json_load(image_file)
+            log.info(f"File structure: {list(image_data.keys())}")
+            
             labels = image_data.get("labels", {})
             label_data = image_data.get("label_data", {})
             file_updated = False
             
+            # Debug logging for this file
+            if labels:
+                log.info(f"Found direct labels: {list(labels.keys())}")
+            if label_data:
+                log.info(f"Found label_data: {list(label_data.keys())}")
+            
             if dataset_type == "object_detection":
                 # Update direct labels
                 bounding_boxes = labels.get("boundingBoxes", [])
-                for box in bounding_boxes:
+                log.info(f"Found {len(bounding_boxes)} bounding boxes in direct labels")
+                for i, box in enumerate(bounding_boxes):
+                    log.info(f"Box {i}: class='{box.get('class')}'")
                     if box.get("class") == request.old_class_name:
+                        log.info(f"Renaming class in box {i}: '{request.old_class_name}' -> '{request.new_class_name}'")
                         box["class"] = request.new_class_name
                         updated_annotations += 1
                         file_updated = True
@@ -2233,8 +2250,11 @@ async def rename_class_in_dataset(dataset_name: str, request: RenameClassRequest
                 if label_data and "labels" in label_data:
                     nested_labels = label_data["labels"]
                     nested_bounding_boxes = nested_labels.get("boundingBoxes", [])
-                    for box in nested_bounding_boxes:
+                    log.info(f"Found {len(nested_bounding_boxes)} bounding boxes in nested labels")
+                    for i, box in enumerate(nested_bounding_boxes):
+                        log.info(f"Nested box {i}: class='{box.get('class')}'")
                         if box.get("class") == request.old_class_name:
+                            log.info(f"Renaming class in nested box {i}: '{request.old_class_name}' -> '{request.new_class_name}'")
                             box["class"] = request.new_class_name
                             updated_annotations += 1
                             file_updated = True
@@ -2260,12 +2280,28 @@ async def rename_class_in_dataset(dataset_name: str, request: RenameClassRequest
                     json.dump(image_data, f, indent=2)
                 updated_files += 1
         
-        log.info(f"Renamed class '{request.old_class_name}' to '{request.new_class_name}' in {updated_files} files, {updated_annotations} annotations")
+        # Also update the class definition in metadata if it exists
+        metadata_updated = False
+        if "customClasses" in metadata and request.old_class_name in metadata["customClasses"]:
+            # Move the class definition to the new name
+            old_class_def = metadata["customClasses"][request.old_class_name]
+            old_class_def["name"] = request.new_class_name  # Update the name in the definition
+            metadata["customClasses"][request.new_class_name] = old_class_def
+            del metadata["customClasses"][request.old_class_name]
+            
+            # Save updated metadata
+            with open(metadata_file, 'w', encoding='utf-8') as f:
+                json.dump(metadata, f, indent=2)
+            metadata_updated = True
+            log.info(f"Updated class definition in metadata: '{request.old_class_name}' -> '{request.new_class_name}'")
+        
+        log.info(f"Renamed class '{request.old_class_name}' to '{request.new_class_name}' in {updated_files} files, {updated_annotations} annotations. Metadata updated: {metadata_updated}")
         
         return {
             "message": f"Successfully renamed class '{request.old_class_name}' to '{request.new_class_name}'",
             "updated_files": updated_files,
-            "updated_annotations": updated_annotations
+            "updated_annotations": updated_annotations,
+            "metadata_updated": metadata_updated
         }
         
     except HTTPException:

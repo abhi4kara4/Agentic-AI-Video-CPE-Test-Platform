@@ -122,11 +122,14 @@ const ClassManagement = ({
       onNotification({
         type: 'success',
         title: 'Class Renamed',
-        message: `Successfully renamed '${editingClass}' to '${newClassName.trim()}'. Updated ${response.data.updated_annotations} annotations in ${response.data.updated_files} files.`
+        message: `Successfully renamed '${editingClass}' to '${newClassName.trim()}'. Updated ${response.data.updated_annotations} annotations in ${response.data.updated_files} files.${response.data.metadata_updated ? ' Metadata updated.' : ''}`
       });
       
       setEditingClass(null);
       setNewClassName('');
+      
+      // Refresh the classes list to show the updated name
+      await loadClasses();
       
       if (onClassesUpdated) {
         onClassesUpdated();
