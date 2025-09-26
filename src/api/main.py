@@ -2210,10 +2210,13 @@ async def rename_class_in_dataset(dataset_name: str, request: RenameClassRequest
         updated_files = 0
         updated_annotations = 0
         
-        # Debug: count total files
+        # Debug: count total files and list them
         all_json_files = list(dataset_dir.glob("*.json"))
         non_metadata_files = [f for f in all_json_files if f.name != "metadata.json"]
+        log.info(f"Dataset directory: {dataset_dir}")
+        log.info(f"All JSON files found: {[f.name for f in all_json_files]}")
         log.info(f"Processing {len(non_metadata_files)} image JSON files for class rename")
+        log.info(f"Looking for class name: '{request.old_class_name}' to rename to: '{request.new_class_name}'")
         
         # Process all image JSON files
         for image_file in dataset_dir.glob("*.json"):
@@ -2239,12 +2242,19 @@ async def rename_class_in_dataset(dataset_name: str, request: RenameClassRequest
                 bounding_boxes = labels.get("boundingBoxes", [])
                 log.info(f"Found {len(bounding_boxes)} bounding boxes in direct labels")
                 for i, box in enumerate(bounding_boxes):
-                    log.info(f"Box {i}: class='{box.get('class')}'")
-                    if box.get("class") == request.old_class_name:
-                        log.info(f"Renaming class in box {i}: '{request.old_class_name}' -> '{request.new_class_name}'")
+                    current_class = box.get('class')
+                    log.info(f"Box {i}: class='{current_class}' (comparing with '{request.old_class_name}')")
+                    log.info(f"Exact match: {current_class == request.old_class_name}, Types: {type(current_class)} vs {type(request.old_class_name)}")
+                    if current_class == request.old_class_name:
+                        log.info(f"✓ MATCH FOUND - Renaming class in box {i}: '{request.old_class_name}' -> '{request.new_class_name}'")
                         box["class"] = request.new_class_name
                         updated_annotations += 1
                         file_updated = True
+                    else:
+                        log.info(f"✗ No match for box {i}")
+                        
+                if len(bounding_boxes) == 0:
+                    log.info("No bounding boxes found in direct labels")
                 
                 # Update nested label_data.labels structure
                 if label_data and "labels" in label_data:
@@ -2252,12 +2262,20 @@ async def rename_class_in_dataset(dataset_name: str, request: RenameClassRequest
                     nested_bounding_boxes = nested_labels.get("boundingBoxes", [])
                     log.info(f"Found {len(nested_bounding_boxes)} bounding boxes in nested labels")
                     for i, box in enumerate(nested_bounding_boxes):
-                        log.info(f"Nested box {i}: class='{box.get('class')}'")
-                        if box.get("class") == request.old_class_name:
-                            log.info(f"Renaming class in nested box {i}: '{request.old_class_name}' -> '{request.new_class_name}'")
+                        current_class = box.get('class')
+                        log.info(f"Nested box {i}: class='{current_class}' (comparing with '{request.old_class_name}')")
+                        if current_class == request.old_class_name:
+                            log.info(f"✓ NESTED MATCH FOUND - Renaming class in box {i}: '{request.old_class_name}' -> '{request.new_class_name}'")
                             box["class"] = request.new_class_name
                             updated_annotations += 1
                             file_updated = True
+                        else:
+                            log.info(f"✗ No nested match for box {i}")
+                            
+                    if len(nested_bounding_boxes) == 0:
+                        log.info("No bounding boxes found in nested labels")
+                else:
+                    log.info("No nested label_data.labels structure found")
                         
             elif dataset_type == "image_classification":
                 # Update direct labels
@@ -2276,9 +2294,12 @@ async def rename_class_in_dataset(dataset_name: str, request: RenameClassRequest
             
             if file_updated:
                 # Save updated file
+                log.info(f"✓ Saving updated file: {image_file.name}")
                 with open(image_file, 'w', encoding='utf-8') as f:
                     json.dump(image_data, f, indent=2)
                 updated_files += 1
+            else:
+                log.info(f"✗ No changes made to file: {image_file.name}")
         
         # Also update the class definition in metadata if it exists
         metadata_updated = False
@@ -2295,12 +2316,58 @@ async def rename_class_in_dataset(dataset_name: str, request: RenameClassRequest
             metadata_updated = True
             log.info(f"Updated class definition in metadata: '{request.old_class_name}' -> '{request.new_class_name}'")
         
-        log.info(f"Renamed class '{request.old_class_name}' to '{request.new_class_name}' in {updated_files} files, {updated_annotations} annotations. Metadata updated: {metadata_updated}")
+        # Also update YOLO format files if they exist
+        yolo_files_updated = 0
+        
+        # Update classes.txt if it exists
+        classes_file = dataset_dir / "classes.txt"
+        if classes_file.exists():
+            try:
+                with open(classes_file, 'r') as f:
+                    class_lines = f.readlines()
+                
+                updated_class_lines = []
+                for line in class_lines:
+                    class_name = line.strip()
+                    if class_name == request.old_class_name:
+                        updated_class_lines.append(request.new_class_name + '\n')
+                        log.info(f"Updated classes.txt: '{request.old_class_name}' -> '{request.new_class_name}'")
+                    else:
+                        updated_class_lines.append(line)
+                
+                with open(classes_file, 'w') as f:
+                    f.writelines(updated_class_lines)
+                yolo_files_updated += 1
+            except Exception as e:
+                log.error(f"Failed to update classes.txt: {e}")
+        
+        # Update YAML files if they exist
+        yaml_files = ["data.yaml", "dataset.yaml"]
+        for yaml_file_name in yaml_files:
+            yaml_file = dataset_dir / yaml_file_name
+            if yaml_file.exists():
+                try:
+                    with open(yaml_file, 'r') as f:
+                        yaml_content = f.read()
+                    
+                    # Simple string replacement in YAML (basic approach)
+                    if request.old_class_name in yaml_content:
+                        updated_content = yaml_content.replace(request.old_class_name, request.new_class_name)
+                        
+                        with open(yaml_file, 'w') as f:
+                            f.write(updated_content)
+                        log.info(f"Updated {yaml_file_name}: '{request.old_class_name}' -> '{request.new_class_name}'")
+                        yolo_files_updated += 1
+                except Exception as e:
+                    log.error(f"Failed to update {yaml_file_name}: {e}")
+        
+        log.info(f"Renamed class '{request.old_class_name}' to '{request.new_class_name}' in {updated_files} annotation files, {updated_annotations} annotations, {yolo_files_updated} YOLO files. Metadata updated: {metadata_updated}")
         
         return {
             "message": f"Successfully renamed class '{request.old_class_name}' to '{request.new_class_name}'",
             "updated_files": updated_files,
             "updated_annotations": updated_annotations,
+            "yolo_files_updated": yolo_files_updated,
             "metadata_updated": metadata_updated
         }
         

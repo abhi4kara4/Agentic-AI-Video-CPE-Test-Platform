@@ -122,7 +122,7 @@ const ClassManagement = ({
       onNotification({
         type: 'success',
         title: 'Class Renamed',
-        message: `Successfully renamed '${editingClass}' to '${newClassName.trim()}'. Updated ${response.data.updated_annotations} annotations in ${response.data.updated_files} files.${response.data.metadata_updated ? ' Metadata updated.' : ''}`
+        message: `Successfully renamed '${editingClass}' to '${newClassName.trim()}'. Updated ${response.data.updated_annotations} annotations in ${response.data.updated_files} files${response.data.yolo_files_updated ? `, ${response.data.yolo_files_updated} YOLO files` : ''}.${response.data.metadata_updated ? ' Metadata updated.' : ''}`
       });
       
       setEditingClass(null);
