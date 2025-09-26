@@ -58,10 +58,9 @@ const ObjectDetectionLabeler = ({
   const [panStart, setPanStart] = useState(null);
   const [startPos, setStartPos] = useState(null);
   const [currentBox, setCurrentBox] = useState(null);
-  // Merge custom classes with default classes
-  const availableClasses = customClasses 
-    ? { ...OBJECT_DETECTION_CLASSES, ...customClasses }
-    : OBJECT_DETECTION_CLASSES;
+  // Use custom classes if provided, otherwise fall back to defaults
+  // Custom classes should contain ALL relevant classes for the dataset
+  const availableClasses = customClasses || OBJECT_DETECTION_CLASSES;
   
   // Log when custom classes are provided for debugging
   if (customClasses) {

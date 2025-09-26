@@ -66,7 +66,7 @@ import ObjectDetectionLabeler from './ObjectDetectionLabeler.jsx';
 import ImageClassificationLabeler from './ImageClassificationLabeler.jsx';
 import PaddleOCRLabeler from './PaddleOCRLabeler.jsx';
 import ClassManagement from './ClassManagement.jsx';
-import { DATASET_TYPE_INFO, DATASET_TYPES } from '../constants/datasetTypes.js';
+import { DATASET_TYPE_INFO, DATASET_TYPES, OBJECT_DETECTION_CLASSES } from '../constants/datasetTypes.js';
 
 // Screen state definitions
 const SCREEN_STATES = {
@@ -432,21 +432,66 @@ const DatasetCreation = ({ onNotification }) => {
     }
   };
 
-  // Load custom classes from dataset metadata
+  // Load custom classes from dataset metadata and usage
   const loadDatasetCustomClasses = async (datasetName) => {
     try {
-      const response = await datasetAPI.getDatasetByName(datasetName);
-      const metadata = response.data || {};
+      // Get both metadata and actual class usage
+      const [metadataResponse, classesResponse] = await Promise.all([
+        datasetAPI.getDatasetByName(datasetName),
+        datasetAPI.getDatasetClasses(datasetName)
+      ]);
       
-      console.log('Loaded dataset metadata:', metadata); // Debug log
+      const metadata = metadataResponse.data || {};
+      const classData = classesResponse.data || {};
       
-      // Update config with custom classes from dataset metadata
-      if (metadata.customClasses) {
+      // Build comprehensive custom classes object
+      const usedClasses = classData.classes || [];
+      const definedCustomClasses = metadata.customClasses || {};
+      const allRelevantClasses = {};
+      
+      // Add all used classes - check if they exist in default classes first
+      usedClasses.forEach(className => {
+        if (OBJECT_DETECTION_CLASSES[className]) {
+          // Use default class definition
+          allRelevantClasses[className] = OBJECT_DETECTION_CLASSES[className];
+        } else if (definedCustomClasses[className]) {
+          // Use custom class definition
+          allRelevantClasses[className] = definedCustomClasses[className];
+        } else {
+          // Create a basic definition for unknown classes
+          allRelevantClasses[className] = {
+            id: Object.keys(allRelevantClasses).length,
+            name: className,
+            color: `#${Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')}`
+          };
+        }
+      });
+      
+      // Add any explicitly defined custom classes that aren't used yet
+      Object.keys(definedCustomClasses).forEach(className => {
+        if (!allRelevantClasses[className]) {
+          allRelevantClasses[className] = definedCustomClasses[className];
+        }
+      });
+      
+      console.log(`Dataset ${datasetName}: Found ${usedClasses.length} used classes, ${Object.keys(definedCustomClasses).length} defined custom classes`);
+      
+      // Update config with the comprehensive custom classes
+      if (Object.keys(allRelevantClasses).length > 0) {
         setConfig(prev => ({
           ...prev,
           customClasses: {
             ...prev.customClasses,
-            object_detection: metadata.customClasses
+            object_detection: allRelevantClasses
+          }
+        }));
+      } else {
+        // No custom classes needed, remove custom classes to use defaults
+        setConfig(prev => ({
+          ...prev,
+          customClasses: {
+            ...prev.customClasses,
+            object_detection: null
           }
         }));
       }
