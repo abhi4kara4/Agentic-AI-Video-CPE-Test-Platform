@@ -2135,10 +2135,15 @@ async def get_dataset_classes(dataset_name: str):
         # Collect all classes from labeled images
         classes_used = set()
         
-        for image_file in dataset_dir.glob("*.json"):
-            if image_file.name == "metadata.json":
-                continue
-                
+        # Get all annotation files from both root and annotations directory
+        all_json_files = list(dataset_dir.glob("*.json"))
+        annotations_dir = dataset_dir / "annotations"
+        
+        all_annotation_files = [f for f in all_json_files if f.name != "metadata.json"]
+        if annotations_dir.exists():
+            all_annotation_files.extend(list(annotations_dir.glob("*.json")))
+        
+        for image_file in all_annotation_files:
             image_data = safe_json_load(image_file)
             
             # Check both direct labels and label_data structure
@@ -2210,20 +2215,28 @@ async def rename_class_in_dataset(dataset_name: str, request: RenameClassRequest
         updated_files = 0
         updated_annotations = 0
         
-        # Debug: count total files and list them
+        # Debug: count total files and list them - check both root and annotations subdirectory
         all_json_files = list(dataset_dir.glob("*.json"))
-        non_metadata_files = [f for f in all_json_files if f.name != "metadata.json"]
+        annotations_dir = dataset_dir / "annotations"
+        annotation_json_files = []
+        
+        if annotations_dir.exists():
+            annotation_json_files = list(annotations_dir.glob("*.json"))
+            log.info(f"Found annotations directory: {annotations_dir}")
+            log.info(f"Annotation JSON files found: {[f.name for f in annotation_json_files]}")
+        
+        # Combine both sets of files
+        all_annotation_files = [f for f in all_json_files if f.name != "metadata.json"] + annotation_json_files
+        
         log.info(f"Dataset directory: {dataset_dir}")
-        log.info(f"All JSON files found: {[f.name for f in all_json_files]}")
-        log.info(f"Processing {len(non_metadata_files)} image JSON files for class rename")
+        log.info(f"Root JSON files found: {[f.name for f in all_json_files]}")
+        log.info(f"Total annotation files to process: {len(all_annotation_files)}")
         log.info(f"Looking for class name: '{request.old_class_name}' to rename to: '{request.new_class_name}'")
         
-        # Process all image JSON files
-        for image_file in dataset_dir.glob("*.json"):
-            if image_file.name == "metadata.json":
-                continue
+        # Process all annotation JSON files from both root and annotations directory
+        for image_file in all_annotation_files:
                 
-            log.info(f"Processing file: {image_file.name}")
+            log.info(f"Processing file: {image_file}")
             image_data = safe_json_load(image_file)
             log.info(f"File structure: {list(image_data.keys())}")
             
