@@ -2151,7 +2151,13 @@ async def get_dataset_classes(dataset_name: str):
             label_data = image_data.get("label_data", {})
             
             if dataset_type == "object_detection":
-                # Check in direct labels first
+                # Check direct bounding_boxes field (annotation file format)
+                direct_bounding_boxes = image_data.get("bounding_boxes", [])
+                for box in direct_bounding_boxes:
+                    if box.get("class"):
+                        classes_used.add(box["class"])
+                
+                # Also check legacy format (labels.boundingBoxes)
                 bounding_boxes = labels.get("boundingBoxes", [])
                 for box in bounding_boxes:
                     if box.get("class"):
@@ -2251,44 +2257,55 @@ async def rename_class_in_dataset(dataset_name: str, request: RenameClassRequest
                 log.info(f"Found label_data: {list(label_data.keys())}")
             
             if dataset_type == "object_detection":
-                # Update direct labels
-                bounding_boxes = labels.get("boundingBoxes", [])
-                log.info(f"Found {len(bounding_boxes)} bounding boxes in direct labels")
-                for i, box in enumerate(bounding_boxes):
+                # Check for direct bounding_boxes field (annotation file format)
+                direct_bounding_boxes = image_data.get("bounding_boxes", [])
+                log.info(f"Found {len(direct_bounding_boxes)} bounding boxes in direct bounding_boxes field")
+                
+                for i, box in enumerate(direct_bounding_boxes):
                     current_class = box.get('class')
-                    log.info(f"Box {i}: class='{current_class}' (comparing with '{request.old_class_name}')")
-                    log.info(f"Exact match: {current_class == request.old_class_name}, Types: {type(current_class)} vs {type(request.old_class_name)}")
+                    log.info(f"Direct box {i}: class='{current_class}' (comparing with '{request.old_class_name}')")
                     if current_class == request.old_class_name:
-                        log.info(f"✓ MATCH FOUND - Renaming class in box {i}: '{request.old_class_name}' -> '{request.new_class_name}'")
+                        log.info(f"✓ DIRECT MATCH FOUND - Renaming class in box {i}: '{request.old_class_name}' -> '{request.new_class_name}'")
                         box["class"] = request.new_class_name
                         updated_annotations += 1
                         file_updated = True
                     else:
-                        log.info(f"✗ No match for box {i}")
-                        
-                if len(bounding_boxes) == 0:
-                    log.info("No bounding boxes found in direct labels")
+                        log.info(f"✗ No direct match for box {i}")
                 
-                # Update nested label_data.labels structure
-                if label_data and "labels" in label_data:
-                    nested_labels = label_data["labels"]
-                    nested_bounding_boxes = nested_labels.get("boundingBoxes", [])
-                    log.info(f"Found {len(nested_bounding_boxes)} bounding boxes in nested labels")
-                    for i, box in enumerate(nested_bounding_boxes):
+                # Also check legacy format (labels.boundingBoxes)
+                bounding_boxes = labels.get("boundingBoxes", [])
+                if len(bounding_boxes) > 0:
+                    log.info(f"Found {len(bounding_boxes)} bounding boxes in legacy labels.boundingBoxes")
+                    for i, box in enumerate(bounding_boxes):
                         current_class = box.get('class')
-                        log.info(f"Nested box {i}: class='{current_class}' (comparing with '{request.old_class_name}')")
+                        log.info(f"Legacy box {i}: class='{current_class}' (comparing with '{request.old_class_name}')")
                         if current_class == request.old_class_name:
-                            log.info(f"✓ NESTED MATCH FOUND - Renaming class in box {i}: '{request.old_class_name}' -> '{request.new_class_name}'")
+                            log.info(f"✓ LEGACY MATCH FOUND - Renaming class in box {i}: '{request.old_class_name}' -> '{request.new_class_name}'")
                             box["class"] = request.new_class_name
                             updated_annotations += 1
                             file_updated = True
                         else:
-                            log.info(f"✗ No nested match for box {i}")
-                            
-                    if len(nested_bounding_boxes) == 0:
-                        log.info("No bounding boxes found in nested labels")
-                else:
-                    log.info("No nested label_data.labels structure found")
+                            log.info(f"✗ No legacy match for box {i}")
+                
+                # Also check nested label_data.labels structure
+                if label_data and "labels" in label_data:
+                    nested_labels = label_data["labels"]
+                    nested_bounding_boxes = nested_labels.get("boundingBoxes", [])
+                    if len(nested_bounding_boxes) > 0:
+                        log.info(f"Found {len(nested_bounding_boxes)} bounding boxes in nested labels")
+                        for i, box in enumerate(nested_bounding_boxes):
+                            current_class = box.get('class')
+                            log.info(f"Nested box {i}: class='{current_class}' (comparing with '{request.old_class_name}')")
+                            if current_class == request.old_class_name:
+                                log.info(f"✓ NESTED MATCH FOUND - Renaming class in box {i}: '{request.old_class_name}' -> '{request.new_class_name}'")
+                                box["class"] = request.new_class_name
+                                updated_annotations += 1
+                                file_updated = True
+                            else:
+                                log.info(f"✗ No nested match for box {i}")
+                
+                if len(direct_bounding_boxes) == 0 and len(bounding_boxes) == 0:
+                    log.info("No bounding boxes found in any format")
                         
             elif dataset_type == "image_classification":
                 # Update direct labels
