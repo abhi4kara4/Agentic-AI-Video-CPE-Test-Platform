@@ -33,7 +33,9 @@ import {
   SelectAll as SelectAllIcon,
   Deselect as DeselectIcon,
   ExpandMore as ExpandMoreIcon,
-  Settings as SettingsIcon
+  Settings as SettingsIcon,
+  CheckBox as CheckedIcon,
+  Cancel as CancelIcon
 } from '@mui/icons-material';
 
 import { OBJECT_DETECTION_CLASSES, AUGMENTATION_OPTIONS, DATASET_TYPES } from '../constants/datasetTypes.js';
@@ -88,6 +90,14 @@ const ObjectDetectionLabeler = ({
   const [dragStart, setDragStart] = useState(null);
   const [dragBoxOriginal, setDragBoxOriginal] = useState(null);
   
+  // Polygon annotation states
+  const [annotationMode, setAnnotationMode] = useState('rectangle');
+  const [currentPolygon, setCurrentPolygon] = useState(null);
+  const [isDrawingPolygon, setIsDrawingPolygon] = useState(false);
+  const [polygonPoints, setPolygonPoints] = useState([]);
+  const [editingBox, setEditingBox] = useState(null);
+  const [editingCorner, setEditingCorner] = useState(null);
+  
   // Debug logging for received labels and update boundingBoxes when labels change
   useEffect(() => {
     console.log('ObjectDetectionLabeler received labels:', labels);
@@ -107,6 +117,17 @@ const ObjectDetectionLabeler = ({
   const [zoom, setZoom] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 }); // Track pan offset
   const [interactionMode, setInteractionMode] = useState('label'); // 'label' or 'pan'
+  const [annotationMode, setAnnotationMode] = useState('rectangle'); // 'rectangle' or 'polygon'
+  
+  // Polygon drawing state
+  const [currentPolygon, setCurrentPolygon] = useState(null);
+  const [isDrawingPolygon, setIsDrawingPolygon] = useState(false);
+  const [polygonPoints, setPolygonPoints] = useState([]);
+  
+  // Corner editing state
+  const [editingBox, setEditingBox] = useState(null);
+  const [editingCorner, setEditingCorner] = useState(null);
+  const [cornerDragStart, setCornerDragStart] = useState(null);
   const [canvasSize, setCanvasSize] = useState({ width: 600, height: 400 });
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageParams, setImageParams] = useState({ offsetX: 0, offsetY: 0, drawWidth: 0, drawHeight: 0, baseOffsetX: 0, baseOffsetY: 0 });
@@ -115,7 +136,7 @@ const ObjectDetectionLabeler = ({
     if (imageLoaded) {
       drawCanvas();
     }
-  }, [boundingBoxes, zoom, imageLoaded, panOffset, hoveredBoxId, dragBoxId, dragStart, dragBoxOriginal]);
+  }, [boundingBoxes, zoom, imageLoaded, panOffset, hoveredBoxId, dragBoxId, dragStart, dragBoxOriginal, currentPolygon, polygonPoints, editingBox, editingCorner]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -139,6 +160,14 @@ const ObjectDetectionLabeler = ({
             handleZoomReset();
             event.preventDefault();
             break;
+          case 'r':
+            setAnnotationMode('rectangle');
+            event.preventDefault();
+            break;
+          case 'g':
+            setAnnotationMode('polygon');
+            event.preventDefault();
+            break;
           case 'escape':
             if (isDrawing) {
               setIsDrawing(false);
@@ -155,6 +184,16 @@ const ObjectDetectionLabeler = ({
               setDragStart(null);
               setDragBoxOriginal(null);
             }
+            if (isDrawingPolygon) {
+              setIsDrawingPolygon(false);
+              setPolygonPoints([]);
+              setCurrentPolygon(null);
+            }
+            if (editingBox) {
+              setEditingBox(null);
+              setEditingCorner(null);
+              setCornerDragStart(null);
+            }
             event.preventDefault();
             break;
         }
@@ -163,7 +202,7 @@ const ObjectDetectionLabeler = ({
 
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [isDrawing, isPanning, isDragging]);
+  }, [isDrawing, isPanning, isDragging, isDrawingPolygon, editingBox]);
 
   useEffect(() => {
     onLabelsChange({
@@ -233,6 +272,53 @@ const ObjectDetectionLabeler = ({
     }
   }, [image, zoom, panOffset]);
 
+  // Helper function to draw polygon
+  const drawPolygon = (ctx, points, offsetX, offsetY, drawWidth, drawHeight, color) => {
+    if (points.length < 3) return;
+    
+    ctx.beginPath();
+    const firstPoint = points[0];
+    ctx.moveTo(
+      offsetX + (firstPoint.x * drawWidth),
+      offsetY + (firstPoint.y * drawHeight)
+    );
+    
+    for (let i = 1; i < points.length; i++) {
+      const point = points[i];
+      ctx.lineTo(
+        offsetX + (point.x * drawWidth),
+        offsetY + (point.y * drawHeight)
+      );
+    }
+    
+    ctx.closePath();
+    ctx.stroke();
+  };
+
+  // Helper function to draw corner handles
+  const drawCornerHandles = (ctx, points, offsetX, offsetY, drawWidth, drawHeight) => {
+    const handleSize = 8;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.strokeStyle = '#007bff';
+    ctx.lineWidth = 2;
+    
+    points.forEach((point, index) => {
+      const handleX = offsetX + (point.x * drawWidth) - handleSize / 2;
+      const handleY = offsetY + (point.y * drawHeight) - handleSize / 2;
+      
+      // Draw handle background
+      ctx.fillRect(handleX, handleY, handleSize, handleSize);
+      ctx.strokeRect(handleX, handleY, handleSize, handleSize);
+      
+      // Draw handle number
+      ctx.fillStyle = '#007bff';
+      ctx.font = '10px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText(index.toString(), handleX + handleSize / 2, handleY + handleSize / 2 + 3);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+    });
+  };
+
   const drawCanvas = () => {
     const canvas = canvasRef.current;
     if (!canvas || !imageLoaded || !imageRef.current) return;
@@ -250,9 +336,10 @@ const ObjectDetectionLabeler = ({
       const cls = availableClasses[box.class];
       const isHovered = hoveredBoxId === box.id;
       const isDraggedBox = dragBoxId === box.id;
+      const isBeingEdited = editingBox === box.id;
       
       // Enhanced styling for hovered/dragged boxes
-      if (isHovered || isDraggedBox) {
+      if (isHovered || isDraggedBox || isBeingEdited) {
         // Draw glow effect
         ctx.shadowColor = cls?.color || '#FF0000';
         ctx.shadowBlur = 15;
@@ -264,34 +351,67 @@ const ObjectDetectionLabeler = ({
       
       ctx.strokeStyle = cls?.color || '#FF0000';
       
-      // Calculate box position (use dragged position if being dragged)
-      let boxX = box.x;
-      let boxY = box.y;
+      // Draw shape based on type
+      if (box.points && box.points.length > 2) {
+        // Draw polygon
+        drawPolygon(ctx, box.points, offsetX, offsetY, drawWidth, drawHeight, cls?.color || '#FF0000');
+        
+        // Draw corner handles if editing
+        if (isBeingEdited) {
+          drawCornerHandles(ctx, box.points, offsetX, offsetY, drawWidth, drawHeight);
+        }
+      } else {
+        // Draw rectangle (legacy format)
+        let boxX = box.x;
+        let boxY = box.y;
+        
+        if (isDraggedBox && dragStart && dragBoxOriginal) {
+          // Apply drag offset
+          const dragOffsetX = (dragStart.currentX - dragStart.startX) / drawWidth;
+          const dragOffsetY = (dragStart.currentY - dragStart.startY) / drawHeight;
+          boxX = dragBoxOriginal.x + dragOffsetX;
+          boxY = dragBoxOriginal.y + dragOffsetY;
+        }
+        
+        const rectX = offsetX + (boxX * drawWidth);
+        const rectY = offsetY + (boxY * drawHeight);
+        const rectW = box.width * drawWidth;
+        const rectH = box.height * drawHeight;
+        
+        ctx.strokeRect(rectX, rectY, rectW, rectH);
+        
+        // Draw corner handles if editing
+        if (isBeingEdited) {
+          const corners = [
+            { x: rectX, y: rectY }, // top-left
+            { x: rectX + rectW, y: rectY }, // top-right
+            { x: rectX + rectW, y: rectY + rectH }, // bottom-right
+            { x: rectX, y: rectY + rectH } // bottom-left
+          ];
+          drawCornerHandles(ctx, corners.map(corner => ({
+            x: (corner.x - offsetX) / drawWidth,
+            y: (corner.y - offsetY) / drawHeight
+          })), offsetX, offsetY, drawWidth, drawHeight);
+        }
+      }
+
+      // Draw label background and text
+      const labelText = cls?.name || box.class;
+      ctx.font = isHovered || isDraggedBox || isBeingEdited ? '14px Arial' : '12px Arial';
+      const textMetrics = ctx.measureText(labelText);
       
-      if (isDraggedBox && dragStart && dragBoxOriginal) {
-        // Apply drag offset
-        const dragOffsetX = (dragStart.currentX - dragStart.startX) / drawWidth;
-        const dragOffsetY = (dragStart.currentY - dragStart.startY) / drawHeight;
-        boxX = dragBoxOriginal.x + dragOffsetX;
-        boxY = dragBoxOriginal.y + dragOffsetY;
+      // Position label at the first point (or top-left for rectangles)
+      let labelX, labelY;
+      if (box.points && box.points.length > 0) {
+        labelX = offsetX + (box.points[0].x * drawWidth);
+        labelY = offsetY + (box.points[0].y * drawHeight) - 5;
+      } else {
+        labelX = offsetX + (box.x * drawWidth);
+        labelY = offsetY + (box.y * drawHeight) - 5;
       }
       
-      ctx.strokeRect(
-        offsetX + (boxX * drawWidth),
-        offsetY + (boxY * drawHeight),
-        box.width * drawWidth,
-        box.height * drawHeight
-      );
-
-      // Draw label background
-      const labelText = cls?.name || box.class;
-      ctx.font = isHovered || isDraggedBox ? '14px Arial' : '12px Arial';
-      const textMetrics = ctx.measureText(labelText);
-      const labelX = offsetX + (boxX * drawWidth);
-      const labelY = offsetY + (boxY * drawHeight) - 5;
-      
       ctx.fillStyle = cls?.color || '#FF0000';
-      ctx.fillRect(labelX, labelY - (isHovered || isDraggedBox ? 14 : 12), textMetrics.width + 4, isHovered || isDraggedBox ? 16 : 14);
+      ctx.fillRect(labelX, labelY - (isHovered || isDraggedBox || isBeingEdited ? 14 : 12), textMetrics.width + 4, isHovered || isDraggedBox || isBeingEdited ? 16 : 14);
       
       // Draw label text
       ctx.fillStyle = 'white';
@@ -301,8 +421,8 @@ const ObjectDetectionLabeler = ({
       ctx.shadowBlur = 0;
     });
 
-    // Draw current drawing box
-    if (currentBox) {
+    // Draw current drawing box (rectangle)
+    if (currentBox && annotationMode === 'rectangle') {
       const cls = availableClasses[selectedClass];
       ctx.strokeStyle = cls?.color || '#FF0000';
       ctx.lineWidth = 2;
@@ -314,6 +434,33 @@ const ObjectDetectionLabeler = ({
         currentBox.height
       );
       ctx.setLineDash([]);
+    }
+    
+    // Draw current polygon preview
+    if (currentPolygon && annotationMode === 'polygon') {
+      const cls = availableClasses[selectedClass];
+      ctx.strokeStyle = cls?.color || '#FF0000';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 5]);
+      drawPolygon(ctx, currentPolygon.points, offsetX, offsetY, drawWidth, drawHeight, cls?.color || '#FF0000');
+      ctx.setLineDash([]);
+      
+      // Draw points for current polygon
+      ctx.fillStyle = cls?.color || '#FF0000';
+      currentPolygon.points.forEach((point, index) => {
+        const pointX = offsetX + (point.x * drawWidth);
+        const pointY = offsetY + (point.y * drawHeight);
+        ctx.beginPath();
+        ctx.arc(pointX, pointY, 4, 0, 2 * Math.PI);
+        ctx.fill();
+        
+        // Draw point number
+        ctx.fillStyle = 'white';
+        ctx.font = '10px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(index.toString(), pointX, pointY + 3);
+        ctx.fillStyle = cls?.color || '#FF0000';
+      });
     }
   };
 
@@ -336,11 +483,77 @@ const ObjectDetectionLabeler = ({
     // Check each bounding box (in reverse order to prioritize top boxes)
     for (let i = boundingBoxes.length - 1; i >= 0; i--) {
       const box = boundingBoxes[i];
-      if (imageX >= box.x && imageX <= box.x + box.width &&
-          imageY >= box.y && imageY <= box.y + box.height) {
-        return box;
+      
+      if (box.points && box.points.length > 2) {
+        // Check polygon using point-in-polygon algorithm
+        if (isPointInPolygon({ x: imageX, y: imageY }, box.points)) {
+          return box;
+        }
+      } else {
+        // Check rectangle
+        if (imageX >= box.x && imageX <= box.x + box.width &&
+            imageY >= box.y && imageY <= box.y + box.height) {
+          return box;
+        }
       }
     }
+    return null;
+  };
+  
+  // Point-in-polygon test using ray casting algorithm
+  const isPointInPolygon = (point, polygon) => {
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      if (((polygon[i].y > point.y) !== (polygon[j].y > point.y)) &&
+          (point.x < (polygon[j].x - polygon[i].x) * (point.y - polygon[i].y) / (polygon[j].y - polygon[i].y) + polygon[i].x)) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  };
+  
+  // Find corner handle at position
+  const findCornerAtPosition = (canvasPos) => {
+    if (!editingBox) return null;
+    
+    const { offsetX, offsetY, drawWidth, drawHeight } = imageParams;
+    const box = boundingBoxes.find(b => b.id === editingBox);
+    if (!box) return null;
+    
+    const handleSize = 8;
+    const tolerance = handleSize / 2;
+    
+    if (box.points && box.points.length > 0) {
+      // Check polygon corners
+      for (let i = 0; i < box.points.length; i++) {
+        const handleX = offsetX + (box.points[i].x * drawWidth);
+        const handleY = offsetY + (box.points[i].y * drawHeight);
+        
+        if (Math.abs(canvasPos.x - handleX) <= tolerance &&
+            Math.abs(canvasPos.y - handleY) <= tolerance) {
+          return { boxId: box.id, cornerIndex: i };
+        }
+      }
+    } else {
+      // Check rectangle corners
+      const corners = [
+        { x: box.x, y: box.y }, // top-left
+        { x: box.x + box.width, y: box.y }, // top-right
+        { x: box.x + box.width, y: box.y + box.height }, // bottom-right
+        { x: box.x, y: box.y + box.height } // bottom-left
+      ];
+      
+      for (let i = 0; i < corners.length; i++) {
+        const handleX = offsetX + (corners[i].x * drawWidth);
+        const handleY = offsetY + (corners[i].y * drawHeight);
+        
+        if (Math.abs(canvasPos.x - handleX) <= tolerance &&
+            Math.abs(canvasPos.y - handleY) <= tolerance) {
+          return { boxId: box.id, cornerIndex: i };
+        }
+      }
+    }
+    
     return null;
   };
 
@@ -361,11 +574,23 @@ const ObjectDetectionLabeler = ({
     if (interactionMode === 'pan') {
       setIsPanning(true);
       setPanStart(pos);
-    } else {
-      // Check if clicking on an existing box for dragging
-      const clickedBox = findBoxAtPosition(pos);
-      
-      if (clickedBox) {
+      return;
+    }
+    
+    // Check if clicking on a corner handle for editing
+    const corner = findCornerAtPosition(pos);
+    if (corner) {
+      setEditingCorner(corner);
+      return;
+    }
+    
+    // Check if clicking on an existing box
+    const clickedBox = findBoxAtPosition(pos);
+    
+    if (clickedBox) {
+      if (event.detail === 2) { // Double click
+        setEditingBox(clickedBox.id);
+      } else {
         // Start dragging existing box
         setIsDragging(true);
         setDragBoxId(clickedBox.id);
@@ -376,8 +601,30 @@ const ObjectDetectionLabeler = ({
           currentX: pos.x,
           currentY: pos.y
         });
+      }
+    } else {
+      // Clear editing mode if clicking elsewhere
+      if (editingBox) {
+        setEditingBox(null);
+        return;
+      }
+      
+      if (annotationMode === 'polygon') {
+        // Handle polygon drawing
+        const { offsetX, offsetY, drawWidth, drawHeight } = imageParams;
+        const normalizedX = Math.max(0, Math.min(1, (pos.x - offsetX) / drawWidth));
+        const normalizedY = Math.max(0, Math.min(1, (pos.y - offsetY) / drawHeight));
+        
+        if (!isDrawingPolygon) {
+          // Start new polygon
+          setIsDrawingPolygon(true);
+          setPolygonPoints([{ x: normalizedX, y: normalizedY }]);
+        } else {
+          // Add point to current polygon
+          setPolygonPoints(prev => [...prev, { x: normalizedX, y: normalizedY }]);
+        }
       } else {
-        // Start drawing new box
+        // Start drawing rectangle
         setIsDrawing(true);
         setStartPos(pos);
       }
@@ -401,6 +648,35 @@ const ObjectDetectionLabeler = ({
       return;
     }
     
+    if (editingCorner) {
+      // Handle corner dragging
+      const { offsetX, offsetY, drawWidth, drawHeight } = imageParams;
+      const normalizedX = Math.max(0, Math.min(1, (pos.x - offsetX) / drawWidth));
+      const normalizedY = Math.max(0, Math.min(1, (pos.y - offsetY) / drawHeight));
+      
+      setBoundingBoxes(prev => prev.map(box => {
+        if (box.id === editingCorner.boxId) {
+          if (box.points && box.points.length > editingCorner.cornerIndex) {
+            const newPoints = [...box.points];
+            newPoints[editingCorner.cornerIndex] = { x: normalizedX, y: normalizedY };
+            return { ...box, points: newPoints };
+          } else {
+            // Handle rectangle corner editing - convert to polygon
+            const corners = [
+              { x: box.x, y: box.y },
+              { x: box.x + box.width, y: box.y },
+              { x: box.x + box.width, y: box.y + box.height },
+              { x: box.x, y: box.y + box.height }
+            ];
+            corners[editingCorner.cornerIndex] = { x: normalizedX, y: normalizedY };
+            return { ...box, points: corners, x: undefined, y: undefined, width: undefined, height: undefined };
+          }
+        }
+        return box;
+      }));
+      return;
+    }
+    
     if (isDragging && dragStart) {
       // Handle box dragging
       setDragStart(prev => ({
@@ -411,9 +687,22 @@ const ObjectDetectionLabeler = ({
       return;
     }
     
-    if (!isDrawing || !startPos) return;
+    if (isDrawingPolygon && polygonPoints.length > 0) {
+      // Update current polygon preview
+      const { offsetX, offsetY, drawWidth, drawHeight } = imageParams;
+      const normalizedX = Math.max(0, Math.min(1, (pos.x - offsetX) / drawWidth));
+      const normalizedY = Math.max(0, Math.min(1, (pos.y - offsetY) / drawHeight));
+      
+      setCurrentPolygon({
+        points: [...polygonPoints, { x: normalizedX, y: normalizedY }],
+        class: selectedClass
+      });
+      return;
+    }
+    
+    if (!isDrawing || !startPos || annotationMode !== 'rectangle') return;
 
-    // Handle bounding box drawing
+    // Handle rectangle drawing
     const width = pos.x - startPos.x;
     const height = pos.y - startPos.y;
 
@@ -439,21 +728,42 @@ const ObjectDetectionLabeler = ({
       return;
     }
     
+    if (editingCorner) {
+      setEditingCorner(null);
+      return;
+    }
+    
     if (isDragging) {
       // Complete drag operation
       if (dragBoxId && dragStart && dragBoxOriginal) {
         const { offsetX, offsetY, drawWidth, drawHeight } = imageParams;
         
-        // Calculate new position
-        const dragOffsetX = (dragStart.currentX - dragStart.startX) / drawWidth;
-        const dragOffsetY = (dragStart.currentY - dragStart.startY) / drawHeight;
-        const newX = Math.max(0, Math.min(1 - dragBoxOriginal.width, dragBoxOriginal.x + dragOffsetX));
-        const newY = Math.max(0, Math.min(1 - dragBoxOriginal.height, dragBoxOriginal.y + dragOffsetY));
-        
-        // Update the box position
-        setBoundingBoxes(prev => prev.map(box => 
-          box.id === dragBoxId ? { ...box, x: newX, y: newY } : box
-        ));
+        if (dragBoxOriginal.points) {
+          // Handle polygon dragging
+          const dragOffsetX = (dragStart.currentX - dragStart.startX) / drawWidth;
+          const dragOffsetY = (dragStart.currentY - dragStart.startY) / drawHeight;
+          
+          setBoundingBoxes(prev => prev.map(box => {
+            if (box.id === dragBoxId) {
+              const newPoints = box.points.map(point => ({
+                x: Math.max(0, Math.min(1, point.x + dragOffsetX)),
+                y: Math.max(0, Math.min(1, point.y + dragOffsetY))
+              }));
+              return { ...box, points: newPoints };
+            }
+            return box;
+          }));
+        } else {
+          // Handle rectangle dragging
+          const dragOffsetX = (dragStart.currentX - dragStart.startX) / drawWidth;
+          const dragOffsetY = (dragStart.currentY - dragStart.startY) / drawHeight;
+          const newX = Math.max(0, Math.min(1 - dragBoxOriginal.width, dragBoxOriginal.x + dragOffsetX));
+          const newY = Math.max(0, Math.min(1 - dragBoxOriginal.height, dragBoxOriginal.y + dragOffsetY));
+          
+          setBoundingBoxes(prev => prev.map(box => 
+            box.id === dragBoxId ? { ...box, x: newX, y: newY } : box
+          ));
+        }
       }
       
       setIsDragging(false);
@@ -463,37 +773,37 @@ const ObjectDetectionLabeler = ({
       return;
     }
     
-    if (!isDrawing || !currentBox) return;
-
-    // Convert canvas coordinates to normalized coordinates relative to the actual image
-    const { offsetX, offsetY, drawWidth, drawHeight } = imageParams;
-    
-    // Calculate the bounding box relative to the image (not the canvas)
-    const imageRelativeBox = {
-      x: Math.max(0, (currentBox.x - offsetX) / drawWidth),
-      y: Math.max(0, (currentBox.y - offsetY) / drawHeight),
-      width: Math.min(1, currentBox.width / drawWidth),
-      height: Math.min(1, currentBox.height / drawHeight)
-    };
-
-    // Ensure the box is within image bounds and has reasonable size
-    if (imageRelativeBox.width > 0.02 && imageRelativeBox.height > 0.02 &&
-        imageRelativeBox.x >= 0 && imageRelativeBox.y >= 0 &&
-        imageRelativeBox.x + imageRelativeBox.width <= 1 &&
-        imageRelativeBox.y + imageRelativeBox.height <= 1) {
+    if (annotationMode === 'rectangle' && isDrawing && currentBox) {
+      // Convert canvas coordinates to normalized coordinates relative to the actual image
+      const { offsetX, offsetY, drawWidth, drawHeight } = imageParams;
       
-      const normalizedBox = {
-        id: Date.now(),
-        class: selectedClass,
-        ...imageRelativeBox
+      // Calculate the bounding box relative to the image (not the canvas)
+      const imageRelativeBox = {
+        x: Math.max(0, (currentBox.x - offsetX) / drawWidth),
+        y: Math.max(0, (currentBox.y - offsetY) / drawHeight),
+        width: Math.min(1, currentBox.width / drawWidth),
+        height: Math.min(1, currentBox.height / drawHeight)
       };
-      
-      setBoundingBoxes(prev => [...prev, normalizedBox]);
-    }
 
-    setIsDrawing(false);
-    setStartPos(null);
-    setCurrentBox(null);
+      // Ensure the box is within image bounds and has reasonable size
+      if (imageRelativeBox.width > 0.02 && imageRelativeBox.height > 0.02 &&
+          imageRelativeBox.x >= 0 && imageRelativeBox.y >= 0 &&
+          imageRelativeBox.x + imageRelativeBox.width <= 1 &&
+          imageRelativeBox.y + imageRelativeBox.height <= 1) {
+        
+        const normalizedBox = {
+          id: Date.now(),
+          class: selectedClass,
+          ...imageRelativeBox
+        };
+        
+        setBoundingBoxes(prev => [...prev, normalizedBox]);
+      }
+
+      setIsDrawing(false);
+      setStartPos(null);
+      setCurrentBox(null);
+    }
   };
 
   const handleDeleteBox = (boxId) => {
@@ -536,6 +846,61 @@ const ObjectDetectionLabeler = ({
   const toggleInteractionMode = () => {
     setInteractionMode(prev => prev === 'label' ? 'pan' : 'label');
   };
+  
+  // Complete polygon creation
+  const completePolygon = () => {
+    if (!isDrawingPolygon || polygonPoints.length < 3) return;
+    
+    const newPolygonBox = {
+      id: Date.now(),
+      class: selectedClass,
+      points: polygonPoints
+    };
+    
+    setBoundingBoxes(prev => [...prev, newPolygonBox]);
+    setIsDrawingPolygon(false);
+    setPolygonPoints([]);
+    setCurrentPolygon(null);
+  };
+  
+  // Cancel polygon creation
+  const cancelPolygon = () => {
+    setIsDrawingPolygon(false);
+    setPolygonPoints([]);
+    setCurrentPolygon(null);
+  };
+  
+  // Handle keyboard shortcuts
+  const handleKeyDown = (event) => {
+    if (event.key === 'r' || event.key === 'R') {
+      setAnnotationMode('rectangle');
+      cancelPolygon();
+    } else if (event.key === 'g' || event.key === 'G') {
+      setAnnotationMode('polygon');
+      setIsDrawing(false);
+      setCurrentBox(null);
+    } else if (event.key === 'Enter' && isDrawingPolygon) {
+      completePolygon();
+    } else if (event.key === 'Escape') {
+      if (isDrawingPolygon) {
+        cancelPolygon();
+      } else if (editingBox) {
+        setEditingBox(null);
+      }
+    }
+  };
+  
+  // Add keyboard event listener
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (canvas) {
+      canvas.addEventListener('keydown', handleKeyDown);
+      canvas.setAttribute('tabindex', '0'); // Make canvas focusable
+      return () => {
+        canvas.removeEventListener('keydown', handleKeyDown);
+      };
+    }
+  }, [isDrawingPolygon, editingBox]);
 
   const handleCopyAnnotations = () => {
     if (boundingBoxes.length === 0) return;
@@ -680,14 +1045,27 @@ const ObjectDetectionLabeler = ({
           <Paper sx={{ p: 2 }}>
             {/* Mode and Zoom Controls */}
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-              <Typography variant="subtitle2" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                 <Chip 
                   label={interactionMode === 'label' ? 'Label Mode' : 'Pan Mode'} 
                   color={interactionMode === 'label' ? 'primary' : 'secondary'}
                   size="small"
                 />
-                {interactionMode === 'label' ? 'Draw new boxes or drag existing ones' : 'Pan around image'}
-              </Typography>
+                <Chip 
+                  label={annotationMode === 'rectangle' ? 'Rectangle' : 'Polygon'} 
+                  color={annotationMode === 'rectangle' ? 'default' : 'warning'}
+                  size="small"
+                  onClick={() => setAnnotationMode(annotationMode === 'rectangle' ? 'polygon' : 'rectangle')}
+                  variant="outlined"
+                />
+                {isDrawingPolygon && (
+                  <Chip 
+                    label={`${polygonPoints.length} points`}
+                    size="small"
+                    color="info"
+                  />
+                )}
+              </Box>
               <Box sx={{ display: 'flex', gap: 0.5 }}>
                 <Tooltip title={`Switch to ${interactionMode === 'label' ? 'Pan' : 'Label'} Mode`}>
                   <IconButton 
@@ -718,6 +1096,25 @@ const ObjectDetectionLabeler = ({
                     <UndoIcon />
                   </IconButton>
                 </Tooltip>
+                {isDrawingPolygon && (
+                  <>
+                    <Tooltip title="Complete Polygon (Enter)">
+                      <IconButton 
+                        size="small" 
+                        color="success" 
+                        onClick={completePolygon}
+                        disabled={polygonPoints.length < 3}
+                      >
+                        <CheckedIcon />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Cancel Polygon (Esc)">
+                      <IconButton size="small" color="error" onClick={cancelPolygon}>
+                        <CancelIcon />
+                      </IconButton>
+                    </Tooltip>
+                  </>
+                )}
                 {showCopyPaste && (
                   <>
                     <Tooltip title={boundingBoxes.length === 0 ? "No annotations to copy" : "Copy Annotations"}>
@@ -796,11 +1193,51 @@ const ObjectDetectionLabeler = ({
         <Grid item xs={12} md={4}>
           <Paper sx={{ p: 2 }}>
             <Typography variant="subtitle1" gutterBottom>
-              Class Selection
+              Annotation Controls
             </Typography>
             
+            {/* Annotation Mode Selection */}
+            <Box sx={{ mb: 2 }}>
+              <Typography variant="body2" gutterBottom>
+                Annotation Mode
+              </Typography>
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Button
+                  variant={annotationMode === 'rectangle' ? 'contained' : 'outlined'}
+                  size="small"
+                  onClick={() => {
+                    setAnnotationMode('rectangle');
+                    cancelPolygon();
+                  }}
+                >
+                  Rectangle (R)
+                </Button>
+                <Button
+                  variant={annotationMode === 'polygon' ? 'contained' : 'outlined'}
+                  size="small"
+                  onClick={() => {
+                    setAnnotationMode('polygon');
+                    setIsDrawing(false);
+                    setCurrentBox(null);
+                  }}
+                >
+                  Polygon (G)
+                </Button>
+              </Box>
+              {annotationMode === 'polygon' && (
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                  Click to add points, Enter to complete, Esc to cancel
+                </Typography>
+              )}
+              {editingBox && (
+                <Typography variant="caption" color="primary" sx={{ mt: 1, display: 'block' }}>
+                  Editing mode: Drag corners to adjust shape
+                </Typography>
+              )}
+            </Box>
+            
             <FormControl fullWidth sx={{ mb: 2 }}>
-              <InputLabel>Object Class</InputLabel>
+              <InputLabel>Class Selection</InputLabel>
               <Select
                 value={selectedClass}
                 onChange={(e) => setSelectedClass(e.target.value)}
