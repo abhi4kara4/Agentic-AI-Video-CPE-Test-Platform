@@ -117,17 +117,6 @@ const ObjectDetectionLabeler = ({
   const [zoom, setZoom] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 }); // Track pan offset
   const [interactionMode, setInteractionMode] = useState('label'); // 'label' or 'pan'
-  const [annotationMode, setAnnotationMode] = useState('rectangle'); // 'rectangle' or 'polygon'
-  
-  // Polygon drawing state
-  const [currentPolygon, setCurrentPolygon] = useState(null);
-  const [isDrawingPolygon, setIsDrawingPolygon] = useState(false);
-  const [polygonPoints, setPolygonPoints] = useState([]);
-  
-  // Corner editing state
-  const [editingBox, setEditingBox] = useState(null);
-  const [editingCorner, setEditingCorner] = useState(null);
-  const [cornerDragStart, setCornerDragStart] = useState(null);
   const [canvasSize, setCanvasSize] = useState({ width: 600, height: 400 });
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageParams, setImageParams] = useState({ offsetX: 0, offsetY: 0, drawWidth: 0, drawHeight: 0, baseOffsetX: 0, baseOffsetY: 0 });
