@@ -10,12 +10,47 @@ from typing import Dict, List, Tuple
 import random
 
 
-def convert_annotations_to_yolo(annotations: List[Dict], image_width: int, image_height: int, class_mapping: Dict[str, int]) -> List[str]:
+def polygon_to_bbox(points: List[Dict]) -> Tuple[float, float, float, float]:
     """
-    Convert bounding box annotations to YOLO format
+    Convert polygon points to minimum bounding rectangle
     
     Args:
-        annotations: List of bounding box annotations with x, y, width, height (normalized 0-1)
+        points: List of points with x, y coordinates (normalized 0-1)
+    
+    Returns:
+        Tuple of (x, y, width, height) for bounding box (normalized 0-1)
+    """
+    if not points or len(points) < 3:
+        return 0, 0, 0, 0
+    
+    x_coords = [p['x'] for p in points]
+    y_coords = [p['y'] for p in points]
+    
+    min_x = min(x_coords)
+    max_x = max(x_coords)
+    min_y = min(y_coords)
+    max_y = max(y_coords)
+    
+    # Ensure coordinates are within bounds
+    min_x = max(0, min(1, min_x))
+    max_x = max(0, min(1, max_x))
+    min_y = max(0, min(1, min_y))
+    max_y = max(0, min(1, max_y))
+    
+    width = max_x - min_x
+    height = max_y - min_y
+    
+    return min_x, min_y, width, height
+
+
+def convert_annotations_to_yolo(annotations: List[Dict], image_width: int, image_height: int, class_mapping: Dict[str, int]) -> List[str]:
+    """
+    Convert bounding box and polygon annotations to YOLO format
+    
+    Args:
+        annotations: List of annotations with either:
+                    - Rectangle: x, y, width, height (normalized 0-1)
+                    - Polygon: points array with x, y coordinates (normalized 0-1)
         image_width: Original image width
         image_height: Original image height
         class_mapping: Mapping from class names to class indices
@@ -32,14 +67,24 @@ def convert_annotations_to_yolo(annotations: List[Dict], image_width: int, image
             
         class_id = class_mapping[class_name]
         
-        # Annotations are already normalized (0-1), just need to convert to YOLO format
-        # YOLO format: class_id center_x center_y width height
-        x = ann['x']  # top-left x (normalized)
-        y = ann['y']  # top-left y (normalized)
-        w = ann['width']  # width (normalized)
-        h = ann['height']  # height (normalized)
+        # Handle both polygon and rectangle annotations
+        if 'points' in ann and ann['points']:
+            # Polygon annotation - convert to bounding box
+            x, y, w, h = polygon_to_bbox(ann['points'])
+            print(f"Converted polygon with {len(ann['points'])} points to bbox: ({x:.3f}, {y:.3f}, {w:.3f}, {h:.3f})")
+        else:
+            # Rectangle annotation
+            x = ann.get('x', 0)  # top-left x (normalized)
+            y = ann.get('y', 0)  # top-left y (normalized)
+            w = ann.get('width', 0)  # width (normalized)
+            h = ann.get('height', 0)  # height (normalized)
         
-        # Convert to center coordinates
+        # Skip invalid bounding boxes
+        if w <= 0 or h <= 0:
+            print(f"Warning: Skipping invalid bounding box with dimensions {w}x{h}")
+            continue
+        
+        # Convert to center coordinates for YOLO format
         center_x = x + w / 2
         center_y = y + h / 2
         
