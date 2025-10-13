@@ -1247,16 +1247,28 @@ async def generate_yolo_dataset(training_dir: Path, train_images: list, val_imag
         shutil.copy2(item["image_file"], val_img_path)
         val_paths.append(str(val_img_path))
         
+        # Convert annotations to YOLO format using the dataset converter
         annotation = item["annotation"]
         yolo_label_path = training_dir / "labels" / "val" / f"val_{i:04d}.txt"
         
         with open(yolo_label_path, "w") as f:
             if annotation.get("bounding_boxes"):
-                for bbox in annotation["bounding_boxes"]:
-                    class_id = classes.index(bbox["class"]) if bbox["class"] in classes else 0
-                    center_x = bbox["x"] + bbox["width"] / 2
-                    center_y = bbox["y"] + bbox["height"] / 2
-                    f.write(f"{class_id} {center_x:.6f} {center_y:.6f} {bbox['width']:.6f} {bbox['height']:.6f}\n")
+                # Import and use the dataset converter
+                from src.models.dataset_converter import convert_annotations_to_yolo
+                
+                # Create class mapping
+                class_mapping = {cls: idx for idx, cls in enumerate(classes)}
+                
+                # Convert annotations (handles both rectangles and polygons)
+                yolo_lines = convert_annotations_to_yolo(
+                    annotation["bounding_boxes"], 
+                    1, 1,  # Image dimensions (annotations are already normalized)
+                    class_mapping
+                )
+                
+                # Write YOLO format lines
+                for line in yolo_lines:
+                    f.write(f"{line}\n")
     
     # Write train.txt and val.txt
     with open(training_dir / "train.txt", "w") as f:
